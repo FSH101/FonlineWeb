@@ -1,19 +1,22 @@
 import http from 'http';
 import express from 'express';
+import path from 'path';
 import { config } from './config';
 import { logger } from './logger';
 import { GameWebSocketServer } from './network/websocketServer';
 import { ScriptManager } from './scripts/scriptManager';
 import { checkDatabaseConnection } from './database';
-import path from 'path';
+import { GameWorld } from './world/gameWorld';
 
 export class GameServer {
   private readonly app = express();
   private readonly httpServer = http.createServer(this.app);
-  private readonly wsServer = new GameWebSocketServer(this.httpServer);
+  private readonly world = new GameWorld();
+  private readonly wsServer: GameWebSocketServer;
   private readonly scriptManager: ScriptManager;
 
   constructor() {
+    this.wsServer = new GameWebSocketServer(this.httpServer, this.world);
     this.configureMiddleware();
     const scriptsDir = path.join(process.cwd(), 'game-scripts');
     this.scriptManager = new ScriptManager(scriptsDir);
@@ -27,6 +30,10 @@ export class GameServer {
   private registerRoutes() {
     this.app.get('/health', (_req, res) => {
       res.json({ status: 'ok', time: Date.now() });
+    });
+
+    this.app.get('/world', (_req, res) => {
+      res.json(this.world.getSnapshot());
     });
   }
 

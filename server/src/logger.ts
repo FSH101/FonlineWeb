@@ -1,8 +1,9 @@
 /* eslint-disable no-console */
 export enum LogLevel {
+  DEBUG = 'DEBUG',
   INFO = 'INFO',
   WARN = 'WARN',
-  ERROR = 'ERROR'
+  ERROR = 'ERROR',
 }
 
 const formatMessage = (level: LogLevel, message: string) => {
@@ -10,7 +11,16 @@ const formatMessage = (level: LogLevel, message: string) => {
   return `[${timestamp}] [${level}] ${message}`;
 };
 
+const shouldLogDebug = () => {
+  return process.env.NODE_ENV !== 'production';
+};
+
 export const logger = {
+  debug(message: string) {
+    if (shouldLogDebug()) {
+      console.debug(formatMessage(LogLevel.DEBUG, message));
+    }
+  },
   info(message: string) {
     console.log(formatMessage(LogLevel.INFO, message));
   },
@@ -22,5 +32,5 @@ export const logger = {
     if (error) {
       console.error(error);
     }
-  }
+  },
 };

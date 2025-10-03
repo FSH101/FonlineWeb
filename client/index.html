@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fonline Web — Тестовый клиент</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="panel">
+        <h1>Тестовый клиент гексового поля</h1>
+        <p>
+          Управление персонажем осуществляется клавишами
+          <code>Q</code>, <code>W</code>, <code>E</code>, <code>A</code>,
+          <code>S</code>, <code>D</code>.
+        </p>
+        <p>
+          Подключение к серверу выполняется автоматически при загрузке
+          страницы. Текущие координаты отображаются ниже.
+        </p>
+        <div class="status" id="connectionStatus">Отключено</div>
+        <div class="status" id="positionStatus">q: -, r: -</div>
+      </section>
+      <canvas id="hexCanvas"></canvas>
+    </main>
+    <script type="module" src="main.js"></script>
+  </body>
+</html>

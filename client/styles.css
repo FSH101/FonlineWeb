@@ -1,0 +1,72 @@
+:root {
+  color-scheme: dark;
+  font-family: 'Roboto', 'Segoe UI', sans-serif;
+  background-color: #000;
+  color: #e0e0e0;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  min-height: 100vh;
+}
+
+.panel {
+  padding: 24px;
+  background: rgba(15, 15, 15, 0.9);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.panel h1 {
+  font-size: 1.25rem;
+  margin: 0 0 1rem;
+}
+
+.panel p {
+  line-height: 1.5;
+  margin: 0 0 0.75rem;
+}
+
+.status {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  font-family: 'Roboto Mono', monospace;
+}
+
+.status[data-variant='ok'] {
+  background: rgba(46, 204, 113, 0.2);
+  color: #9fffb0;
+}
+
+.status[data-variant='error'] {
+  background: rgba(231, 76, 60, 0.2);
+  color: #ffb3a6;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
+@media (max-width: 960px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+
+  .panel {
+    border-right: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  canvas {
+    height: 60vh;
+  }
+}
