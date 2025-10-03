@@ -1,4 +1,5 @@
 import http from 'http';
+import fs from 'fs';
 import express from 'express';
 import path from 'path';
 import { config } from './config';
@@ -14,17 +15,26 @@ export class GameServer {
   private readonly world = new GameWorld();
   private readonly wsServer: GameWebSocketServer;
   private readonly scriptManager: ScriptManager;
+  private readonly publicDir: string | null;
 
   constructor() {
     this.wsServer = new GameWebSocketServer(this.httpServer, this.world);
+    this.publicDir = this.resolvePublicDir();
     this.configureMiddleware();
     const scriptsDir = path.join(process.cwd(), 'game-scripts');
     this.scriptManager = new ScriptManager(scriptsDir);
     this.registerRoutes();
+    this.registerStaticFallback();
   }
 
   private configureMiddleware() {
     this.app.use(express.json());
+    if (this.publicDir) {
+      logger.info(`Статические файлы обслуживаются из ${this.publicDir}`);
+      this.app.use(express.static(this.publicDir));
+    } else {
+      logger.warn('Каталог со статическими файлами не найден, клиент недоступен');
+    }
   }
 
   private registerRoutes() {
@@ -35,6 +45,52 @@ export class GameServer {
     this.app.get('/world', (_req, res) => {
       res.json(this.world.getSnapshot());
     });
+  }
+
+  private registerStaticFallback() {
+    if (!this.publicDir) {
+      return;
+    }
+
+    const indexHtmlPath = path.join(this.publicDir, 'index.html');
+    if (!fs.existsSync(indexHtmlPath)) {
+      logger.warn(
+        `Файл index.html не найден в каталоге ${this.publicDir}, SPA-фоллбек отключён`
+      );
+      return;
+    }
+
+    this.app.get('*', (_req, res) => {
+      res.sendFile(indexHtmlPath);
+    });
+  }
+
+  private resolvePublicDir(): string | null {
+    const candidates = [
+      config.publicDir,
+      path.join(process.cwd(), 'public'),
+      path.join(process.cwd(), 'client'),
+      path.join(process.cwd(), '..', 'public'),
+      path.join(process.cwd(), '..', 'client'),
+    ].filter((candidate): candidate is string => Boolean(candidate));
+
+    for (const candidate of candidates) {
+      try {
+        const stats = fs.statSync(candidate);
+        if (stats.isDirectory()) {
+          return candidate;
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          const description = error instanceof Error ? error.message : String(error);
+          logger.warn(
+            `Не удалось проверить каталог статических файлов ${candidate}: ${description}`
+          );
+        }
+      }
+    }
+
+    return null;
   }
 
   async start() {

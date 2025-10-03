@@ -166,9 +166,8 @@ function setConnectionStatus(text, variant = 'default') {
 function connect() {
   setConnectionStatus('Подключение...', 'default');
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  const host = window.location.hostname || 'localhost';
-  const port = window.location.port || '8080';
-  const url = `${protocol}://${host}:${port}`;
+  const host = window.location.host || 'localhost:8080';
+  const url = `${protocol}://${host}`;
 
   socket = new WebSocket(url);
 
