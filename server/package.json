@@ -6,21 +6,27 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/index.ts"
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "decode-fr": "ts-node src/tools/decodeFr.ts"
   },
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "commander": "^12.1.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "pg": "^8.11.5",
+    "pngjs": "^7.0.0",
     "ws": "^8.16.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
+    "@types/commander": "^2.12.3",
     "@types/node": "^20.11.30",
     "@types/pg": "^8.11.5",
+    "@types/pngjs": "^6.0.5",
     "@types/ws": "^8.5.10",
+    "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.4.5"
   }
