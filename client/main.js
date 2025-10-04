@@ -1,5 +1,10 @@
 import { loadUiConfig } from './ui/configLoader.js';
 import { tryLoadAnimation } from './player/heroSprite.js';
+import {
+  TILE_W as FLOOR_TILE_W,
+  TILE_H as FLOOR_TILE_H,
+  drawFloorGrid,
+} from './map/MapRenderer.js';
 
 const HEX_SIZE = 24;
 const SQRT3 = Math.sqrt(3);
@@ -13,8 +18,8 @@ const MAP_TEXTURE_BASE_URLS = [
 ];
 const MAP_TEXTURE_RELATIVE_PATH = 'dir_0/frame_00.png';
 
-const FALLOUT_TILE_WIDTH = 80;
-const FALLOUT_TILE_HEIGHT = 36;
+const FALLOUT_TILE_WIDTH = FLOOR_TILE_W;
+const FALLOUT_TILE_HEIGHT = FLOOR_TILE_H;
 const FALLOUT_TILE_EDGE_RADIANS = Math.atan2(FALLOUT_TILE_HEIGHT, FALLOUT_TILE_WIDTH);
 
 const DEFAULT_MAP_TILE_WIDTH = FALLOUT_TILE_WIDTH;
@@ -801,9 +806,8 @@ async function initializeUi() {
 const canvas = document.getElementById('hexCanvas');
 const ctx = canvas.getContext('2d');
 
-let mapTexturePattern = null;
+let mapTextureImage = null;
 let mapTextureReady = false;
-let mapTextureTileCanvas = null;
 let mapTileWidth = DEFAULT_MAP_TILE_WIDTH;
 let mapTileHeight = DEFAULT_MAP_TILE_HEIGHT;
 let mapGridPattern = null;
@@ -890,39 +894,13 @@ function updateIsometricGridPattern() {
   mapGridPattern = ctx.createPattern(patternCanvas, 'repeat');
 }
 
-async function fetchImageBitmap(url) {
-  const response = await fetch(url, { cache: 'no-store' });
-  if (!response.ok) {
-    throw new Error(`Не удалось загрузить карту: ${url} (${response.status})`);
-  }
-
-  const blob = await response.blob();
-
-  if (typeof createImageBitmap === 'function') {
-    const bitmap = await createImageBitmap(blob);
-    return {
-      bitmap,
-      width: bitmap.width ?? 0,
-      height: bitmap.height ?? 0,
-    };
-  }
-
-  return await new Promise((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(blob);
+function loadTileImage(url) {
+  return new Promise((resolve, reject) => {
     const image = new Image();
-    image.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-      resolve({
-        bitmap: image,
-        width: image.naturalWidth || image.width || 0,
-        height: image.naturalHeight || image.height || 0,
-      });
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error(`Не удалось декодировать карту: ${url}`));
-    };
-    image.src = objectUrl;
+    image.crossOrigin = 'anonymous';
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`Не удалось загрузить карту: ${url}`));
+    image.src = url;
   });
 }
 
@@ -931,28 +909,21 @@ async function loadMapTexture() {
 
   for (const source of sources) {
     try {
-      const { bitmap, width, height } = await fetchImageBitmap(source);
-      const effectiveWidth = Math.max(width || DEFAULT_MAP_TILE_WIDTH, 1);
-      const effectiveHeight = Math.max(height || DEFAULT_MAP_TILE_HEIGHT, 1);
-      const tileCanvas = document.createElement('canvas');
-      tileCanvas.width = effectiveWidth;
-      tileCanvas.height = effectiveHeight;
+      const image = await loadTileImage(source);
+      const effectiveWidth = Math.max(
+        image.naturalWidth || image.width || DEFAULT_MAP_TILE_WIDTH,
+        1
+      );
+      const effectiveHeight = Math.max(
+        image.naturalHeight || image.height || DEFAULT_MAP_TILE_HEIGHT,
+        1
+      );
 
-      const tileCtx = tileCanvas.getContext('2d');
-      tileCtx.imageSmoothingEnabled = false;
-      tileCtx.clearRect(0, 0, tileCanvas.width, tileCanvas.height);
-      tileCtx.drawImage(bitmap, 0, 0, tileCanvas.width, tileCanvas.height);
-
-      if (typeof bitmap.close === 'function') {
-        bitmap.close();
-      }
-
-      mapTexturePattern = ctx.createPattern(tileCanvas, 'repeat');
-      mapTextureTileCanvas = tileCanvas;
-      mapTileWidth = tileCanvas.width;
-      mapTileHeight = tileCanvas.height;
-      updateIsometricGridPattern();
+      mapTextureImage = image;
+      mapTileWidth = effectiveWidth;
+      mapTileHeight = effectiveHeight;
       mapTextureReady = true;
+      updateIsometricGridPattern();
       renderWorld();
       return;
     } catch (error) {
@@ -960,7 +931,9 @@ async function loadMapTexture() {
     }
   }
 
+  mapTextureImage = null;
   updateIsometricGridPattern();
+  mapTextureReady = false;
   console.error('Все источники текстуры карты недоступны');
 }
 
@@ -1249,30 +1222,20 @@ function drawHighlight(centerX, centerY, color, lineWidth = HEX_SIZE * 0.18) {
 }
 
 function drawMapBackground() {
-  const tileWidth = mapTileWidth || mapTextureTileCanvas?.width || DEFAULT_MAP_TILE_WIDTH;
-  const tileHeight = mapTileHeight || mapTextureTileCanvas?.height || DEFAULT_MAP_TILE_HEIGHT;
+  const tileWidth = mapTileWidth || DEFAULT_MAP_TILE_WIDTH;
+  const tileHeight = mapTileHeight || DEFAULT_MAP_TILE_HEIGHT;
 
-  if (mapTextureReady && mapTexturePattern && tileWidth && tileHeight) {
-    ctx.save();
-    const offsetX = ((layout.offsetX % tileWidth) + tileWidth) % tileWidth;
-    const offsetY = ((layout.offsetY % tileHeight) + tileHeight) % tileHeight;
-    ctx.translate(-offsetX, -offsetY);
-    ctx.fillStyle = mapTexturePattern;
-    ctx.fillRect(-tileWidth, -tileHeight, canvas.width + tileWidth * 2, canvas.height + tileHeight * 2);
-    ctx.restore();
-    return;
-  }
+  if (mapTextureReady && mapTextureImage && tileWidth && tileHeight) {
+    const coverageEstimate = Math.ceil((canvas.width + canvas.height) / tileWidth);
+    const cols = Math.max(30, coverageEstimate + 6);
+    const rows = Math.max(30, coverageEstimate + 6);
+    const gridHeight = (cols + rows) * (tileHeight / 2);
+    const originX = Math.floor(canvas.width / 2);
+    const originY = Math.floor(canvas.height / 2 - gridHeight / 2 + tileHeight / 2);
 
-  if (mapTextureReady && mapTextureTileCanvas && tileWidth && tileHeight) {
     ctx.save();
-    const offsetX = ((layout.offsetX % tileWidth) + tileWidth) % tileWidth;
-    const offsetY = ((layout.offsetY % tileHeight) + tileHeight) % tileHeight;
-    ctx.translate(-offsetX, -offsetY);
-    for (let x = -tileWidth; x <= canvas.width + tileWidth; x += tileWidth) {
-      for (let y = -tileHeight; y <= canvas.height + tileHeight; y += tileHeight) {
-        ctx.drawImage(mapTextureTileCanvas, x, y);
-      }
-    }
+    ctx.imageSmoothingEnabled = false;
+    drawFloorGrid(ctx, mapTextureImage, cols, rows, originX, originY);
     ctx.restore();
     return;
   }

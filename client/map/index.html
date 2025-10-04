@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fonline Web — Карта пола</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #0d0d0d;
+        color: #f4f1e0;
+        font-family: 'Segoe UI', Roboto, sans-serif;
+      }
+      .page {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      header {
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        opacity: 0.8;
+      }
+      canvas {
+        flex: 1 1 auto;
+        width: 100%;
+        height: 100%;
+        display: block;
+        background: #000;
+      }
+      footer {
+        padding: 0.5rem 1rem;
+        font-size: 0.85rem;
+        opacity: 0.65;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header>Fallout Floor Preview · 80×36 tiles</header>
+      <canvas id="map" aria-label="Превью напольных ромбов"></canvas>
+      <footer>Источник плитки загружается удалённо; сетка 30×30 ромбов.</footer>
+    </div>
+    <script type="module" src="./MapPage.js"></script>
+  </body>
+</html>
