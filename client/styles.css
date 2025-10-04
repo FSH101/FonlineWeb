@@ -11,6 +11,16 @@
   --danger: #ff6259;
   --panel-radius: 12px;
   --hud-gap: clamp(12px, 2vw, 24px);
+  --ui-bottom-gap: var(--hud-gap);
+  --ui-command-width: 320px;
+  --ui-command-button-gap: 12px;
+  --ui-command-button-height: 48px;
+  --ui-chat-width: clamp(520px, 60vw, 760px);
+  --ui-chat-max-height: 260px;
+  --ui-chat-input-height: 48px;
+  --ui-overlay-width: 520px;
+  --ui-overlay-max-height: 420px;
+  --ui-overlay-padding: clamp(1.5rem, 4vw, 2.5rem);
   font-family: 'Roboto', 'Segoe UI', 'Trebuchet MS', sans-serif;
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -153,8 +163,9 @@ canvas {
 
 .hud-overlay {
   position: relative;
-  width: min(520px, 90vw);
-  padding: clamp(1.5rem, 4vw, 2.5rem);
+  width: min(var(--ui-overlay-width), 90vw);
+  max-height: min(var(--ui-overlay-max-height), 85vh);
+  padding: var(--ui-overlay-padding);
   display: grid;
   gap: 1.25rem;
   text-align: left;
@@ -170,6 +181,19 @@ canvas {
   font-size: 0.95rem;
   line-height: 1.5;
   color: var(--text-secondary);
+}
+
+.overlay__notes {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.overlay__notes li::marker {
+  color: var(--accent);
 }
 
 .overlay__close {
@@ -192,8 +216,11 @@ canvas {
 
 .hud-bottom {
   display: grid;
-  grid-template-columns: minmax(200px, 0.7fr) minmax(420px, 2fr);
-  gap: var(--hud-gap);
+  grid-template-columns: minmax(200px, var(--ui-command-width)) minmax(
+      420px,
+      var(--ui-chat-width)
+    );
+  gap: var(--ui-bottom-gap);
   align-items: stretch;
 }
 
@@ -201,6 +228,7 @@ canvas {
   display: flex;
   flex-direction: column;
   padding: 1rem;
+  max-width: var(--ui-chat-width);
 }
 
 .chat__log {
@@ -209,7 +237,7 @@ canvas {
   padding: 0.5rem;
   list-style: none;
   overflow-y: auto;
-  max-height: 220px;
+  max-height: var(--ui-chat-max-height);
   background: rgba(7, 15, 10, 0.7);
   border: 1px solid rgba(140, 198, 128, 0.2);
   border-radius: 8px;
@@ -259,6 +287,7 @@ canvas {
   background: rgba(10, 21, 13, 0.75);
   color: var(--text-primary);
   font-size: 0.9rem;
+  min-height: var(--ui-chat-input-height);
 }
 
 .chat__form input:focus {
@@ -275,6 +304,7 @@ canvas {
   font-weight: 600;
   letter-spacing: 0.08em;
   cursor: pointer;
+  min-height: var(--ui-chat-input-height);
 }
 
 .chat__form button:hover,
@@ -287,12 +317,13 @@ canvas {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  max-width: var(--ui-command-width);
 }
 
 .command-bar__grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 0.6rem;
+  gap: var(--ui-command-button-gap);
 }
 
 .command-bar button {
@@ -307,6 +338,7 @@ canvas {
   cursor: pointer;
   transition: transform 120ms ease, box-shadow 120ms ease;
   font-size: 0.8rem;
+  min-height: var(--ui-command-button-height);
 }
 
 .command-bar button:hover,
@@ -317,7 +349,7 @@ canvas {
 
 @media (max-width: 1200px) {
   .hud-bottom {
-    grid-template-columns: minmax(220px, 0.9fr) minmax(320px, 1.1fr);
+    grid-template-columns: minmax(200px, 1fr);
   }
 
   .command-bar__grid {
