@@ -1,7 +1,7 @@
 import { loadUiConfig } from './ui/configLoader.js';
 import { tryLoadAnimation } from './player/heroSprite.js';
 
-const HEX_SIZE = 12;
+const HEX_SIZE = 24;
 const SQRT3 = Math.sqrt(3);
 
 const DIRECTION_VECTORS = {
@@ -12,13 +12,6 @@ const DIRECTION_VECTORS = {
   southWest: { q: -1, r: 1 },
   southEast: { q: 0, r: 1 },
 };
-
-const vectorDirectionLookup = new Map(
-  Object.entries(DIRECTION_VECTORS).map(([direction, vector]) => [
-    `${vector.q}:${vector.r}`,
-    direction,
-  ])
-);
 
 const connectionStatusEl = document.getElementById('connectionStatus');
 const chatLogEl = document.getElementById('chatLog');
@@ -854,7 +847,11 @@ function updateVisualForPlayer(player, previous = null) {
     visual.startPosition = startPosition;
     visual.currentPosition = { ...startPosition };
     visual.moveStartTime = now;
-    visual.moveDuration = playerSettings.moveDuration;
+    const steps = Math.max(
+      axialDistance(previous.position.axial, player.position.axial),
+      1
+    );
+    visual.moveDuration = playerSettings.moveDuration * steps;
     visual.moving = true;
     setVisualAnimation(visual, 'run');
   } else {
@@ -911,7 +908,7 @@ function drawHexTile(centerX, centerY, variant = 0) {
   ctx.fillStyle = basePalette[idx];
   ctx.fill();
 
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = Math.max(HEX_SIZE * 0.12, 1.5);
   ctx.strokeStyle = '#1a1208';
   ctx.stroke();
 
@@ -933,13 +930,13 @@ function drawHexTile(centerX, centerY, variant = 0) {
   ctx.restore();
 }
 
-function drawHighlight(centerX, centerY, color, lineWidth = 2.5) {
+function drawHighlight(centerX, centerY, color, lineWidth = HEX_SIZE * 0.18) {
   ctx.save();
   hexPath(centerX, centerY, HEX_SIZE * 0.94);
   ctx.lineWidth = lineWidth;
   ctx.strokeStyle = color;
   ctx.shadowColor = color;
-  ctx.shadowBlur = 8;
+  ctx.shadowBlur = Math.max(HEX_SIZE * 0.35, 8);
   ctx.stroke();
   ctx.restore();
 }
@@ -951,7 +948,7 @@ function drawPlayerFallback(centerX, centerY, isSelf) {
   ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
   ctx.fillStyle = isSelf ? '#c0ff56' : '#64a9ff';
   ctx.fill();
-  ctx.lineWidth = 2;
+  ctx.lineWidth = Math.max(HEX_SIZE * 0.1, 2);
   ctx.strokeStyle = '#0d1208';
   ctx.stroke();
   ctx.restore();
@@ -1149,7 +1146,7 @@ function renderWorld() {
     const key = axialKey(self.position.axial.q, self.position.axial.r);
     const center = layout.tileCenters.get(key);
     if (center) {
-      drawHighlight(center.x, center.y, '#89ff3c', 3);
+      drawHighlight(center.x, center.y, '#89ff3c');
     }
   }
 
@@ -1345,6 +1342,13 @@ function hexRound(q, r) {
   return { q: rx, r: rz };
 }
 
+function axialDistance(a, b) {
+  const dq = a.q - b.q;
+  const dr = a.r - b.r;
+  const ds = -dq - dr;
+  return Math.round((Math.abs(dq) + Math.abs(dr) + Math.abs(ds)) / 2);
+}
+
 function pickHexFromEvent(event) {
   const { x, y } = pointerToCanvas(event);
   const candidate = pixelToAxial(x, y);
@@ -1360,7 +1364,17 @@ function axialDeltaToDirection(from, to) {
   if (dq === 0 && dr === 0) {
     return null;
   }
-  return vectorDirectionLookup.get(`${dq}:${dr}`) ?? null;
+
+  let bestDirection = null;
+  let bestScore = -Infinity;
+  for (const [direction, vector] of Object.entries(DIRECTION_VECTORS)) {
+    const score = dq * vector.q + dr * vector.r;
+    if (score > bestScore) {
+      bestScore = score;
+      bestDirection = direction;
+    }
+  }
+  return bestDirection;
 }
 
 function handleCanvasPointerDown(event) {
@@ -1379,13 +1393,15 @@ function handleCanvasPointerDown(event) {
     return;
   }
 
-  const direction = axialDeltaToDirection(self.position.axial, hex);
-  if (!direction) {
-    addSystemMessage('Можно перемещаться только на соседние гексы');
+  if (
+    self.position.axial.q === hex.q &&
+    self.position.axial.r === hex.r
+  ) {
+    addSystemMessage('Вы уже на выбранном гексе');
     return;
   }
 
-  sendMove(direction);
+  sendMoveTo(hex);
 }
 
 function connect() {
@@ -1465,7 +1481,7 @@ function handleInit(payload) {
   synchronizeVisualsWithWorld();
   renderWorld();
   addSystemMessage('Вы появились в центре пустоши');
-  addSystemMessage('Кликните по соседнему гексу, чтобы переместиться');
+  addSystemMessage('Кликните по любому гексу, чтобы переместиться');
 }
 
 function updatePlayer(player) {
@@ -1474,13 +1490,13 @@ function updatePlayer(player) {
   updateVisualForPlayer(player, previous);
 }
 
-function sendMove(direction) {
+function sendMoveTo(target) {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     addSystemMessage('Команда перемещения отклонена: нет соединения');
     return;
   }
   socket.send(
-    JSON.stringify({ type: 'player:move', payload: { direction } })
+    JSON.stringify({ type: 'player:move', payload: { target } })
   );
 }
 
@@ -1517,7 +1533,17 @@ window.addEventListener('keydown', event => {
     return;
   }
   event.preventDefault();
-  sendMove(direction);
+  const self = getSelfPlayer();
+  if (!self) {
+    addSystemMessage('Ожидание соединения с сервером...');
+    return;
+  }
+  const vector = DIRECTION_VECTORS[direction];
+  const target = {
+    q: self.position.axial.q + vector.q,
+    r: self.position.axial.r + vector.r,
+  };
+  sendMoveTo(target);
 });
 
 canvas.addEventListener('pointerdown', handleCanvasPointerDown);
