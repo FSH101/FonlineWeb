@@ -21,38 +21,46 @@
               <span class="status-label">Связь</span>
               <span class="status-value" id="connectionStatus">Отключено</span>
             </div>
-            <div class="status-block">
-              <span class="status-label">Координаты</span>
-              <span class="status-value" id="positionStatus">q: -, r: -</span>
-            </div>
-            <div class="status-block">
-              <span class="status-label">Наведение</span>
-              <span class="status-value" id="hoverStatus">q: -, r: -</span>
-            </div>
           </div>
         </header>
-        <div class="hud-columns">
-          <aside class="hud-side panel">
-            <h2 class="panel__title">Состояние бойца</h2>
+        <div class="hud-middle">
+          <section class="hud-center panel" aria-label="Характеристики бойца">
+            <h2 class="panel__title">Характеристики бойца</h2>
             <ul class="stat-list">
-              <li><span class="stat-label">HP</span><span class="stat-value" id="hpStat">42 / 60</span></li>
-              <li><span class="stat-label">AP</span><span class="stat-value" id="apStat">7 / 9</span></li>
-              <li><span class="stat-label">Радио</span><span class="stat-value">Тихий эфир</span></li>
-              <li><span class="stat-label">Задание</span><span class="stat-value">Разведка пустоши</span></li>
+              <li>
+                <span class="stat-label">Здоровье</span>
+                <span class="stat-value" id="hpStat">42 / 60</span>
+              </li>
+              <li>
+                <span class="stat-label">Очки действия</span>
+                <span class="stat-value" id="apStat">7 / 9</span>
+              </li>
+              <li>
+                <span class="stat-label">Сила</span>
+                <span class="stat-value">5</span>
+              </li>
+              <li>
+                <span class="stat-label">Ловкость</span>
+                <span class="stat-value">7</span>
+              </li>
+              <li>
+                <span class="stat-label">Восприятие</span>
+                <span class="stat-value">6</span>
+              </li>
             </ul>
-          </aside>
-          <aside class="hud-side panel">
-            <h2 class="panel__title">Экипировка</h2>
-            <div class="equipment-grid">
-              <div class="equipment-slot">Броня</div>
-              <div class="equipment-slot">Оружие 1</div>
-              <div class="equipment-slot">Оружие 2</div>
-              <div class="equipment-slot">Предметы</div>
-            </div>
-            <div class="panel__footer">Дважды нажмите, чтобы открыть детали (заглушка)</div>
-          </aside>
+          </section>
         </div>
         <footer class="hud-bottom">
+          <section class="command-bar panel" id="commandBar" aria-label="Панель действий">
+            <header class="panel__title">Действия</header>
+            <div class="command-bar__grid">
+              <button type="button" data-action="inventory">Инвентарь</button>
+              <button type="button" data-action="map">Карта</button>
+              <button type="button" data-action="settings">Настройки</button>
+              <button type="button" data-action="character">Персонаж</button>
+              <button type="button" data-action="equipment">Экипировка</button>
+            </div>
+          </section>
           <section class="chat panel" aria-label="Чат">
             <header class="panel__title">Чат</header>
             <ul class="chat__log" id="chatLog" aria-live="polite"></ul>
@@ -66,24 +74,6 @@
               />
               <button type="submit">Отправить</button>
             </form>
-          </section>
-          <section class="command-bar panel" id="commandBar" aria-label="Панель действий">
-            <header class="panel__title">Действия</header>
-            <div class="command-bar__grid">
-              <button type="button" data-action="inventory">Инвентарь</button>
-              <button type="button" data-action="character">Персонаж</button>
-              <button type="button" data-action="skills">Навыки</button>
-              <button type="button" data-action="map">Карта</button>
-              <button type="button" data-action="radio">Радио</button>
-              <button type="button" data-action="settings">Настройки</button>
-            </div>
-            <p class="command-bar__hint">Кликните по гексу или коснитесь экрана для перемещения</p>
-          </section>
-          <section class="log panel" aria-label="Журнал">
-            <header class="panel__title">Журнал событий</header>
-            <ul class="log__list" id="eventLog">
-              <li>Подключитесь, чтобы увидеть события мира</li>
-            </ul>
           </section>
         </footer>
       </div>

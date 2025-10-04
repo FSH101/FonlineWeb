@@ -18,9 +18,6 @@ const vectorDirectionLookup = new Map(
 );
 
 const connectionStatusEl = document.getElementById('connectionStatus');
-const positionStatusEl = document.getElementById('positionStatus');
-const hoverStatusEl = document.getElementById('hoverStatus');
-const eventLogEl = document.getElementById('eventLog');
 const chatLogEl = document.getElementById('chatLog');
 const chatFormEl = document.getElementById('chatForm');
 const chatInputEl = document.getElementById('chatInput');
@@ -33,7 +30,6 @@ const worldState = {
   grid: null,
   players: new Map(),
   selfId: null,
-  hovered: null,
 };
 
 const layout = {
@@ -185,14 +181,6 @@ function renderWorld() {
     }
   }
 
-  if (worldState.hovered) {
-    const key = axialKey(worldState.hovered.q, worldState.hovered.r);
-    const center = layout.tileCenters.get(key);
-    if (center) {
-      drawHighlight(center.x, center.y, '#56f7ff', 2.5);
-    }
-  }
-
   for (const player of worldState.players.values()) {
     const key = axialKey(player.position.axial.q, player.position.axial.r);
     const center = layout.tileCenters.get(key);
@@ -201,38 +189,9 @@ function renderWorld() {
   }
 }
 
-function updatePositionStatus() {
-  const self = getSelfPlayer();
-  if (!self) {
-    positionStatusEl.textContent = 'q: -, r: -';
-    return;
-  }
-  const { q, r } = self.position.axial;
-  positionStatusEl.textContent = `q: ${q}, r: ${r}`;
-}
-
-function updateHoverStatus() {
-  if (!worldState.hovered) {
-    hoverStatusEl.textContent = 'q: -, r: -';
-    return;
-  }
-  const { q, r } = worldState.hovered;
-  hoverStatusEl.textContent = `q: ${q}, r: ${r}`;
-}
-
 function setConnectionStatus(text, variant = 'default') {
   connectionStatusEl.textContent = text;
   connectionStatusEl.dataset.variant = variant;
-}
-
-function appendEventLog(message) {
-  if (!eventLogEl) return;
-  const li = document.createElement('li');
-  li.textContent = message;
-  eventLogEl.prepend(li);
-  while (eventLogEl.children.length > 20) {
-    eventLogEl.removeChild(eventLogEl.lastElementChild);
-  }
 }
 
 function appendChatMessage(author, text, variant = 'system') {
@@ -263,7 +222,6 @@ function addSystemMessage(text) {
 
 function addActionFeedback(action) {
   addSystemMessage(`Действие «${action}» пока не реализовано`);
-  appendEventLog(`Вы выбрали действие: ${action}`);
 }
 
 function getSelfPlayer() {
@@ -315,21 +273,6 @@ function hexRound(q, r) {
   return { q: rx, r: rz };
 }
 
-function setHoveredHex(hex) {
-  const currentKey = worldState.hovered
-    ? axialKey(worldState.hovered.q, worldState.hovered.r)
-    : null;
-  const nextKey = hex ? axialKey(hex.q, hex.r) : null;
-
-  if (currentKey === nextKey) {
-    return;
-  }
-
-  worldState.hovered = hex;
-  updateHoverStatus();
-  renderWorld();
-}
-
 function pickHexFromEvent(event) {
   const { x, y } = pointerToCanvas(event);
   const candidate = pixelToAxial(x, y);
@@ -348,22 +291,11 @@ function axialDeltaToDirection(from, to) {
   return vectorDirectionLookup.get(`${dq}:${dr}`) ?? null;
 }
 
-function handleCanvasPointerMove(event) {
-  const hex = pickHexFromEvent(event);
-  setHoveredHex(hex);
-}
-
-function handleCanvasPointerLeave() {
-  setHoveredHex(null);
-}
-
 function handleCanvasPointerDown(event) {
   const hex = pickHexFromEvent(event);
   if (!hex) {
-    setHoveredHex(null);
     return;
   }
-  setHoveredHex(hex);
 
   const self = getSelfPlayer();
   if (!self) {
@@ -373,7 +305,7 @@ function handleCanvasPointerDown(event) {
 
   const direction = axialDeltaToDirection(self.position.axial, hex);
   if (!direction) {
-    appendEventLog('Можно перемещаться только на соседние гексы');
+    addSystemMessage('Можно перемещаться только на соседние гексы');
     return;
   }
 
@@ -391,22 +323,19 @@ function connect() {
   socket.addEventListener('open', () => {
     setConnectionStatus('Подключено', 'ok');
     addSystemMessage('Соединение установлено');
-    appendEventLog('Установлено соединение с сервером');
   });
 
   socket.addEventListener('close', () => {
     setConnectionStatus('Отключено', 'error');
     addSystemMessage('Соединение потеряно, попытка переподключения...');
-    appendEventLog('Связь потеряна, повторная попытка через 3 секунды');
     worldState.players.clear();
     renderWorld();
-    updatePositionStatus();
     setTimeout(connect, 3000);
   });
 
   socket.addEventListener('error', () => {
     setConnectionStatus('Ошибка подключения', 'error');
-    appendEventLog('Не удалось установить соединение');
+    addSystemMessage('Не удалось установить соединение с сервером');
   });
 
   socket.addEventListener('message', event => {
@@ -430,16 +359,16 @@ function handleServerMessage(message) {
       break;
     case 'world:playerJoined':
       updatePlayer(message.payload.player);
-      appendEventLog(`Игрок ${message.payload.player.name ?? message.payload.player.id} присоединился`);
+      addSystemMessage(
+        `Игрок ${message.payload.player.name ?? message.payload.player.id} присоединился`
+      );
       break;
     case 'world:playerLeft':
       worldState.players.delete(message.payload.playerId);
-      appendEventLog(`Игрок ${message.payload.playerId} покинул сервер`);
+      addSystemMessage(`Игрок ${message.payload.playerId} покинул сервер`);
       renderWorld();
-      updatePositionStatus();
       break;
     case 'world:error':
-      appendEventLog(`Сервер: ${message.payload.message}`);
       addSystemMessage(message.payload.message);
       break;
     default:
@@ -456,20 +385,18 @@ function handleInit(payload) {
   }
   computeLayout(worldState.grid);
   renderWorld();
-  updatePositionStatus();
-  appendEventLog('Вы появились в центре пустоши');
+  addSystemMessage('Вы появились в центре пустоши');
   addSystemMessage('Кликните по соседнему гексу, чтобы переместиться');
 }
 
 function updatePlayer(player) {
   worldState.players.set(player.id, player);
   renderWorld();
-  updatePositionStatus();
 }
 
 function sendMove(direction) {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
-    appendEventLog('Команда перемещения отклонена: нет соединения');
+    addSystemMessage('Команда перемещения отклонена: нет соединения');
     return;
   }
   socket.send(
@@ -495,8 +422,6 @@ window.addEventListener('keydown', event => {
 });
 
 canvas.addEventListener('pointerdown', handleCanvasPointerDown);
-canvas.addEventListener('pointermove', handleCanvasPointerMove);
-canvas.addEventListener('pointerleave', handleCanvasPointerLeave);
 
 if (chatFormEl && chatInputEl) {
   chatFormEl.addEventListener('submit', event => {
@@ -506,7 +431,6 @@ if (chatFormEl && chatInputEl) {
       return;
     }
     appendChatMessage('Вы', value, 'self');
-    appendEventLog(`Вы сказали: ${value}`);
     chatInputEl.value = '';
   });
 }
@@ -529,6 +453,5 @@ window.addEventListener('resize', () => {
 });
 
 addSystemMessage('Загрузка клиента...');
-appendEventLog('Клиент готов к подключению');
 renderWorld();
 connect();
