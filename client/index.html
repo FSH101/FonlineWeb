@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fonline Web — Тестовый интерфейс</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app" role="application">
+      <canvas
+        id="hexCanvas"
+        aria-label="Игровое поле гексагональной карты"
+        tabindex="0"
+      ></canvas>
+      <div class="hud">
+        <header class="hud-top panel">
+          <div class="hud-top__title">Fonline Web — прототип интерфейса</div>
+          <div class="hud-top__status">
+            <div class="status-block">
+              <span class="status-label">Связь</span>
+              <span class="status-value" id="connectionStatus">Отключено</span>
+            </div>
+          </div>
+        </header>
+        <div
+          class="overlay-layer"
+          id="overlayLayer"
+          aria-live="polite"
+          aria-hidden="true"
+        >
+          <div class="overlay-backdrop" data-role="overlay-backdrop"></div>
+        </div>
+        <footer class="hud-bottom">
+          <section class="command-bar panel" id="commandBar" aria-label="Панель действий">
+            <header class="panel__title">Действия</header>
+            <div class="command-bar__grid" data-role="command-buttons"></div>
+         </section>
+          <section class="chat panel" aria-label="Чат">
+            <header class="panel__title">Чат</header>
+            <ul class="chat__log" id="chatLog" aria-live="polite"></ul>
+            <form class="chat__form" id="chatForm" autocomplete="off">
+              <input
+                type="text"
+                id="chatInput"
+                name="message"
+                placeholder="Напишите сообщение..."
+                maxlength="200"
+              />
+              <button type="submit">Отправить</button>
+            </form>
+          </section>
+        </footer>
+      </div>
+    </div>
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
