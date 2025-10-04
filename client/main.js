@@ -69,7 +69,7 @@ const fallbackUiConfig = {
   Player: {
     RunAnimation: 'player/assets/human_female/HFCMBTAB',
     IdleAnimation: 'player/assets/human_female/HFCMBTAA',
-    DirectionOrder: 'southEast, east, northEast, northWest, west, southWest',
+    DirectionOrder: 'northEast, east, southEast, southWest, west, northWest',
     MoveDuration: '280',
     Scale: '2',
     OffsetX: '0',
@@ -156,7 +156,7 @@ let uiConfig = null;
 const DEFAULT_PLAYER_SETTINGS = {
   runPath: 'player/assets/human_female/HFCMBTAB',
   idlePath: 'player/assets/human_female/HFCMBTAA',
-  directionOrder: ['southEast', 'east', 'northEast', 'northWest', 'west', 'southWest'],
+  directionOrder: ['northEast', 'east', 'southEast', 'southWest', 'west', 'northWest'],
   moveDuration: 280,
   scale: 2,
   offsetX: 0,

@@ -1,10 +1,10 @@
 const FEMALE_DIRECTION_ORDER = [
-  'southEast',
-  'east',
   'northEast',
-  'northWest',
-  'west',
+  'east',
+  'southEast',
   'southWest',
+  'west',
+  'northWest',
 ];
 
 const FEMALE_REMOTE_BASE = 'https://raw.githubusercontent.com/FSH101/TLA3.0TG/main/assets/critter/human_female';
