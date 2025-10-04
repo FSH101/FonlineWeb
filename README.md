@@ -105,7 +105,8 @@ docker run --rm -p 8080:8080 --env DATABASE_URL=... fonlineweb
 3. **Подтвердите использование `render.yaml`.** Render обнаружит файл конфигурации и предложит создать инфраструктуру из него. Убедитесь, что в предварительном просмотре выбран сервис `fonlineweb` с типом `web service` и источником `Dockerfile`.
 4. **Проверьте параметры сборки.** Для веб-сервиса убедитесь, что:
    - `Runtime` установлен в `Docker` (Render подставит это автоматически);
-   - `Docker Context` указывает на корень репозитория (`.`). Это значение также зашито в [`render.yaml`](render.yaml) через поле `dockerContext`, чтобы избежать ошибки `failed to read dockerfile: .../src: is a directory` при попытке сборки из неверной директории;
+   - поле **Dockerfile Path** содержит ровно `Dockerfile` (без `./` и других каталогов). Любое другое значение заставит Render искать Dockerfile в каталоге `src`, что приводит к ошибке `failed to read dockerfile: .../src: is a directory`;
+   - `Docker Build Context Directory` указывает на корень репозитория (`.`). Это значение также зашито в [`render.yaml`](render.yaml) через поле `dockerContext`;
    - `Build Command` — `docker build ...` (Render формирует команду сам на основе `Dockerfile`);
    - `Start Command` пустой — в `Dockerfile` уже задан `CMD`.
 5. **Настройте переменные окружения.** На шаге создания добавьте переменную `DATABASE_URL` со значением строки подключения. При необходимости можно добавить `PUBLIC_DIR`, чтобы сервировать клиент из альтернативной директории.
