@@ -3,6 +3,22 @@ import { tryLoadAnimation } from './player/heroSprite.js';
 
 const HEX_SIZE = 24;
 const SQRT3 = Math.sqrt(3);
+const MAP_TEXTURE_BASE_URLS = [
+  'https://raw.githubusercontent.com/FSH101/TLA3.0TG/main/assets/object/item/BRICK01',
+  'https://raw.githubusercontent.com/FSH101/TLA3.0TG/master/assets/object/item/BRICK01',
+  'assets/object/item/BRICK01',
+  '/assets/object/item/BRICK01',
+  'client/assets/object/item/BRICK01',
+  '/client/assets/object/item/BRICK01',
+];
+const MAP_TEXTURE_RELATIVE_PATH = 'dir_0/frame_00.png';
+
+const FALLOUT_TILE_WIDTH = 80;
+const FALLOUT_TILE_HEIGHT = 36;
+const FALLOUT_TILE_EDGE_RADIANS = Math.atan2(FALLOUT_TILE_HEIGHT, FALLOUT_TILE_WIDTH);
+
+const DEFAULT_MAP_TILE_WIDTH = FALLOUT_TILE_WIDTH;
+const DEFAULT_MAP_TILE_HEIGHT = FALLOUT_TILE_HEIGHT;
 
 const DIRECTION_VECTORS = {
   southEast: { q: 0, r: 1 },
@@ -750,6 +766,172 @@ async function initializeUi() {
 const canvas = document.getElementById('hexCanvas');
 const ctx = canvas.getContext('2d');
 
+let mapTexturePattern = null;
+let mapTextureReady = false;
+let mapTextureTileCanvas = null;
+let mapTileWidth = DEFAULT_MAP_TILE_WIDTH;
+let mapTileHeight = DEFAULT_MAP_TILE_HEIGHT;
+let mapGridPattern = null;
+
+function joinUrl(base, path) {
+  if (!path) {
+    return base;
+  }
+
+  if (!base) {
+    return path;
+  }
+
+  if (/^[a-z]+:\/\//i.test(path) || path.startsWith('/')) {
+    return path;
+  }
+
+  const normalizedBase = String(base).replace(/\/+$/, '');
+  const normalizedPath = String(path).replace(/^\/+/, '');
+  return `${normalizedBase}/${normalizedPath}`;
+}
+
+function collectMapTextureSources() {
+  const uniqueSources = [];
+  const seen = new Set();
+
+  for (const candidateBase of MAP_TEXTURE_BASE_URLS) {
+    if (typeof candidateBase !== 'string') {
+      continue;
+    }
+
+    const trimmedBase = candidateBase.trim();
+    if (!trimmedBase) {
+      continue;
+    }
+
+    const resolved = joinUrl(trimmedBase, MAP_TEXTURE_RELATIVE_PATH);
+    if (seen.has(resolved)) {
+      continue;
+    }
+    seen.add(resolved);
+    uniqueSources.push(resolved);
+  }
+
+  return uniqueSources;
+}
+
+function updateIsometricGridPattern() {
+  const tileWidth = mapTileWidth || DEFAULT_MAP_TILE_WIDTH;
+  const tileHeight = mapTileHeight || DEFAULT_MAP_TILE_HEIGHT;
+
+  if (!tileWidth || !tileHeight) {
+    mapGridPattern = null;
+    return;
+  }
+
+  const patternCanvas = document.createElement('canvas');
+  patternCanvas.width = tileWidth;
+  patternCanvas.height = tileHeight;
+
+  const patternCtx = patternCanvas.getContext('2d');
+  patternCtx.imageSmoothingEnabled = false;
+
+  const midX = tileWidth / 2;
+  const midY = tileHeight / 2;
+  const isoHalfHeight = Math.tan(FALLOUT_TILE_EDGE_RADIANS) * midX;
+  const verticalOffset = midY - isoHalfHeight;
+
+  patternCtx.strokeStyle = 'rgba(12, 9, 6, 0.42)';
+  patternCtx.lineWidth = 1;
+  patternCtx.lineJoin = 'miter';
+  patternCtx.lineCap = 'butt';
+
+  const crispOffset = 0.5;
+
+  patternCtx.beginPath();
+  patternCtx.moveTo(midX + crispOffset, verticalOffset + crispOffset);
+  patternCtx.lineTo(tileWidth + crispOffset, midY + crispOffset);
+  patternCtx.lineTo(midX + crispOffset, tileHeight - verticalOffset + crispOffset);
+  patternCtx.lineTo(crispOffset, midY + crispOffset);
+  patternCtx.closePath();
+  patternCtx.stroke();
+
+  mapGridPattern = ctx.createPattern(patternCanvas, 'repeat');
+}
+
+async function fetchImageBitmap(url) {
+  const response = await fetch(url, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Не удалось загрузить карту: ${url} (${response.status})`);
+  }
+
+  const blob = await response.blob();
+
+  if (typeof createImageBitmap === 'function') {
+    const bitmap = await createImageBitmap(blob);
+    return {
+      bitmap,
+      width: bitmap.width ?? 0,
+      height: bitmap.height ?? 0,
+    };
+  }
+
+  return await new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(blob);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve({
+        bitmap: image,
+        width: image.naturalWidth || image.width || 0,
+        height: image.naturalHeight || image.height || 0,
+      });
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error(`Не удалось декодировать карту: ${url}`));
+    };
+    image.src = objectUrl;
+  });
+}
+
+async function loadMapTexture() {
+  const sources = collectMapTextureSources();
+
+  for (const source of sources) {
+    try {
+      const { bitmap, width, height } = await fetchImageBitmap(source);
+      const effectiveWidth = Math.max(width || DEFAULT_MAP_TILE_WIDTH, 1);
+      const effectiveHeight = Math.max(height || DEFAULT_MAP_TILE_HEIGHT, 1);
+      const tileCanvas = document.createElement('canvas');
+      tileCanvas.width = effectiveWidth;
+      tileCanvas.height = effectiveHeight;
+
+      const tileCtx = tileCanvas.getContext('2d');
+      tileCtx.imageSmoothingEnabled = false;
+      tileCtx.clearRect(0, 0, tileCanvas.width, tileCanvas.height);
+      tileCtx.drawImage(bitmap, 0, 0, tileCanvas.width, tileCanvas.height);
+
+      if (typeof bitmap.close === 'function') {
+        bitmap.close();
+      }
+
+      mapTexturePattern = ctx.createPattern(tileCanvas, 'repeat');
+      mapTextureTileCanvas = tileCanvas;
+      mapTileWidth = tileCanvas.width;
+      mapTileHeight = tileCanvas.height;
+      updateIsometricGridPattern();
+      mapTextureReady = true;
+      renderWorld();
+      return;
+    } catch (error) {
+      console.warn('Не удалось загрузить текстуру карты', source, error);
+    }
+  }
+
+  updateIsometricGridPattern();
+  console.error('Все источники текстуры карты недоступны');
+}
+
+updateIsometricGridPattern();
+loadMapTexture();
+
 const worldState = {
   grid: null,
   players: new Map(),
@@ -764,6 +946,7 @@ const layout = {
 };
 
 let socket;
+let hoveredHex = null;
 
 function getTileCenter(axial) {
   if (!axial) {
@@ -1025,6 +1208,93 @@ function drawHighlight(centerX, centerY, color, lineWidth = HEX_SIZE * 0.18) {
   ctx.restore();
 }
 
+function drawMapBackground() {
+  const tileWidth = mapTileWidth || mapTextureTileCanvas?.width || DEFAULT_MAP_TILE_WIDTH;
+  const tileHeight = mapTileHeight || mapTextureTileCanvas?.height || DEFAULT_MAP_TILE_HEIGHT;
+
+  if (mapTextureReady && mapTexturePattern && tileWidth && tileHeight) {
+    ctx.save();
+    const offsetX = ((layout.offsetX % tileWidth) + tileWidth) % tileWidth;
+    const offsetY = ((layout.offsetY % tileHeight) + tileHeight) % tileHeight;
+    ctx.translate(-offsetX, -offsetY);
+    ctx.fillStyle = mapTexturePattern;
+    ctx.fillRect(-tileWidth, -tileHeight, canvas.width + tileWidth * 2, canvas.height + tileHeight * 2);
+    ctx.restore();
+    return;
+  }
+
+  if (mapTextureReady && mapTextureTileCanvas && tileWidth && tileHeight) {
+    ctx.save();
+    const offsetX = ((layout.offsetX % tileWidth) + tileWidth) % tileWidth;
+    const offsetY = ((layout.offsetY % tileHeight) + tileHeight) % tileHeight;
+    ctx.translate(-offsetX, -offsetY);
+    for (let x = -tileWidth; x <= canvas.width + tileWidth; x += tileWidth) {
+      for (let y = -tileHeight; y <= canvas.height + tileHeight; y += tileHeight) {
+        ctx.drawImage(mapTextureTileCanvas, x, y);
+      }
+    }
+    ctx.restore();
+    return;
+  }
+
+  ctx.fillStyle = '#010101';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawIsometricGridOverlay() {
+  const tileWidth = mapTileWidth || DEFAULT_MAP_TILE_WIDTH;
+  const tileHeight = mapTileHeight || DEFAULT_MAP_TILE_HEIGHT;
+  if (!tileWidth || !tileHeight) {
+    return;
+  }
+
+  const offsetX = ((layout.offsetX % tileWidth) + tileWidth) % tileWidth;
+  const offsetY = ((layout.offsetY % tileHeight) + tileHeight) % tileHeight;
+
+  if (mapGridPattern && mapTileWidth && mapTileHeight) {
+    ctx.save();
+    ctx.translate(-offsetX, -offsetY);
+    ctx.fillStyle = mapGridPattern;
+    ctx.fillRect(-tileWidth, -tileHeight, canvas.width + tileWidth * 2, canvas.height + tileHeight * 2);
+    ctx.restore();
+    return;
+  }
+
+  ctx.save();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(12, 9, 6, 0.42)';
+  ctx.translate(-offsetX, -offsetY);
+
+  const startX = -tileWidth;
+  const startY = -tileHeight;
+  const endX = canvas.width + tileWidth;
+  const endY = canvas.height + tileHeight;
+  const crispOffset = 0.5;
+  const halfWidth = tileWidth / 2;
+  const isoHalfHeight = Math.tan(FALLOUT_TILE_EDGE_RADIANS) * halfWidth;
+  const verticalOffset = tileHeight / 2 - isoHalfHeight;
+
+  ctx.beginPath();
+  for (let x = startX; x <= endX; x += tileWidth) {
+    for (let y = startY; y <= endY; y += tileHeight) {
+      const baseX = x + crispOffset;
+      const baseY = y + crispOffset;
+      const midY = baseY + tileHeight / 2;
+      const topY = baseY + verticalOffset;
+      const bottomY = baseY + tileHeight - verticalOffset;
+
+      ctx.moveTo(baseX + halfWidth, topY);
+      ctx.lineTo(baseX + tileWidth, midY);
+      ctx.lineTo(baseX + halfWidth, bottomY);
+      ctx.lineTo(baseX, midY);
+      ctx.closePath();
+    }
+  }
+  ctx.stroke();
+
+  ctx.restore();
+}
+
 function drawPlayerFallback(centerX, centerY, isSelf) {
   const radius = HEX_SIZE * 0.35;
   ctx.save();
@@ -1234,15 +1504,19 @@ function computeLayout(grid) {
 function renderWorld() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+  drawMapBackground();
+  drawIsometricGridOverlay();
+
   if (!layout.orderedTiles.length) {
     return;
   }
 
-  ctx.fillStyle = '#010101';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  for (const { tile, centerX, centerY } of layout.orderedTiles) {
-    drawHexTile(centerX, centerY, tile.q - tile.r);
+  if (hoveredHex) {
+    const hoveredKey = axialKey(hoveredHex.q, hoveredHex.r);
+    const hoveredCenter = layout.tileCenters.get(hoveredKey);
+    if (hoveredCenter) {
+      drawHighlight(hoveredCenter.x, hoveredCenter.y, '#ffd86b', HEX_SIZE * 0.15);
+    }
   }
 
   const self = getSelfPlayer();
@@ -1517,6 +1791,16 @@ function pickHexFromEvent(event) {
   return candidate;
 }
 
+function setHoveredHex(hex) {
+  const currentKey = hoveredHex ? axialKey(hoveredHex.q, hoveredHex.r) : null;
+  const nextKey = hex ? axialKey(hex.q, hex.r) : null;
+  if (currentKey === nextKey) {
+    return;
+  }
+  hoveredHex = hex;
+  renderWorld();
+}
+
 function angleDifference(a, b) {
   const diff = a - b;
   return Math.atan2(Math.sin(diff), Math.cos(diff));
@@ -1575,6 +1859,23 @@ function handleCanvasPointerDown(event) {
   }
 
   sendMoveTo(hex);
+}
+
+function handleCanvasPointerMove(event) {
+  if (activeOverlay) {
+    setHoveredHex(null);
+    return;
+  }
+
+  const hex = pickHexFromEvent(event);
+  setHoveredHex(hex);
+}
+
+function handleCanvasPointerLeave() {
+  if (!hoveredHex) {
+    return;
+  }
+  setHoveredHex(null);
 }
 
 function connect() {
@@ -1651,6 +1952,7 @@ function handleInit(payload) {
     worldState.players.set(player.id, player);
   }
   computeLayout(worldState.grid);
+  hoveredHex = null;
   synchronizeVisualsWithWorld();
   renderWorld();
   addSystemMessage('Вы появились в центре пустоши');
@@ -1720,6 +2022,8 @@ window.addEventListener('keydown', event => {
 });
 
 canvas.addEventListener('pointerdown', handleCanvasPointerDown);
+canvas.addEventListener('pointermove', handleCanvasPointerMove);
+canvas.addEventListener('pointerleave', handleCanvasPointerLeave);
 
 if (chatFormEl && chatInputEl) {
   chatFormEl.addEventListener('submit', event => {
