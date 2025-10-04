@@ -14,15 +14,15 @@
         tabindex="0"
       ></canvas>
       <div class="hud">
-        <header class="hud-top panel">
-          <div class="hud-top__title">Fonline Web — прототип интерфейса</div>
-          <div class="hud-top__status">
-            <div class="status-block">
-              <span class="status-label">Связь</span>
-              <span class="status-value" id="connectionStatus">Отключено</span>
-            </div>
-          </div>
-        </header>
+        <div class="hud-status panel" aria-live="polite">
+          <span class="hud-status__label">Связь</span>
+          <span
+            class="hud-status__value"
+            id="connectionStatus"
+            data-variant="error"
+            >Отключено</span
+          >
+        </div>
         <div
           class="overlay-layer"
           id="overlayLayer"

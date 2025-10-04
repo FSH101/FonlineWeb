@@ -20,6 +20,21 @@ const FALLOUT_TILE_EDGE_RADIANS = Math.atan2(FALLOUT_TILE_HEIGHT, FALLOUT_TILE_W
 const DEFAULT_MAP_TILE_WIDTH = FALLOUT_TILE_WIDTH;
 const DEFAULT_MAP_TILE_HEIGHT = FALLOUT_TILE_HEIGHT;
 
+const mapView = {
+  zoom: 1,
+  minZoom: 0.85,
+  maxZoom: 2.4,
+  step: 0.12,
+};
+
+const DOUBLE_TAP_DELAY_MS = 280;
+const TAP_MOVEMENT_THRESHOLD_PX = 22;
+const SWIPE_MIN_DISTANCE_PX = 36;
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
 const DIRECTION_VECTORS = {
   southEast: { q: 0, r: 1 },
   east: { q: 1, r: 0 },
@@ -48,6 +63,26 @@ const commandBarTitleEl = commandBarEl?.querySelector('.panel__title') ?? null;
 const hudTitleEl = document.querySelector('.hud-top__title');
 const chatTitleEl = document.querySelector('.chat .panel__title');
 const overlayLayerEl = document.getElementById('overlayLayer');
+
+const coarsePointerMedia = window.matchMedia('(hover: none) and (pointer: coarse)');
+
+function isMobileLikeInput() {
+  return coarsePointerMedia.matches || navigator.maxTouchPoints > 0;
+}
+
+function updateInputModeClass() {
+  if (!document.body) {
+    return;
+  }
+  document.body.classList.toggle('is-mobile', isMobileLikeInput());
+}
+
+updateInputModeClass();
+if (typeof coarsePointerMedia.addEventListener === 'function') {
+  coarsePointerMedia.addEventListener('change', updateInputModeClass);
+} else if (typeof coarsePointerMedia.addListener === 'function') {
+  coarsePointerMedia.addListener(updateInputModeClass);
+}
 
 let overlayPanels = new Map();
 let activeOverlay = null;
@@ -948,6 +983,11 @@ const layout = {
 let socket;
 let hoveredHex = null;
 
+let activeTouchGesture = null;
+let pendingTapTimeoutId = null;
+let pendingTapHex = null;
+let lastTapInfo = { time: 0, x: 0, y: 0 };
+
 function getTileCenter(axial) {
   if (!axial) {
     return null;
@@ -1503,11 +1543,17 @@ function computeLayout(grid) {
 
 function renderWorld() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.save();
+  applyMapViewTransform();
 
   drawMapBackground();
   drawIsometricGridOverlay();
 
   if (!layout.orderedTiles.length) {
+    ctx.restore();
     return;
   }
 
@@ -1539,6 +1585,32 @@ function renderWorld() {
       drawPlayerFallback(center.x, center.y, playerId === worldState.selfId);
     }
   }
+
+  ctx.restore();
+}
+
+function applyMapViewTransform() {
+  const centerX = canvas.width / 2;
+  const centerY = canvas.height / 2;
+  ctx.translate(centerX, centerY);
+  ctx.scale(mapView.zoom, mapView.zoom);
+  ctx.translate(-centerX, -centerY);
+}
+
+function setMapZoom(nextZoom) {
+  const clamped = clamp(nextZoom, mapView.minZoom, mapView.maxZoom);
+  if (Math.abs(clamped - mapView.zoom) < 0.001) {
+    return;
+  }
+  mapView.zoom = clamped;
+  renderWorld();
+}
+
+function adjustMapZoom(direction) {
+  if (!direction) {
+    return;
+  }
+  setMapZoom(mapView.zoom + direction * mapView.step);
 }
 
 function setConnectionStatus(text, variant = 'default') {
@@ -1677,14 +1749,22 @@ function getSelfPlayer() {
     : null;
 }
 
+function viewToWorld(x, y) {
+  const centerX = canvas.width / 2;
+  const centerY = canvas.height / 2;
+  return {
+    x: (x - centerX) / mapView.zoom + centerX,
+    y: (y - centerY) / mapView.zoom + centerY,
+  };
+}
+
 function pointerToCanvas(event) {
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
-  return {
-    x: (event.clientX - rect.left) * scaleX,
-    y: (event.clientY - rect.top) * scaleY,
-  };
+  const rawX = (event.clientX - rect.left) * scaleX;
+  const rawY = (event.clientY - rect.top) * scaleY;
+  return viewToWorld(rawX, rawY);
 }
 
 function pixelToAxial(x, y) {
@@ -1782,13 +1862,17 @@ function computeHexLine(from, to) {
   return line;
 }
 
-function pickHexFromEvent(event) {
-  const { x, y } = pointerToCanvas(event);
+function pickHexFromPoint(x, y) {
   const candidate = pixelToAxial(x, y);
   if (!layout.tileCenters.has(axialKey(candidate.q, candidate.r))) {
     return null;
   }
   return candidate;
+}
+
+function pickHexFromEvent(event) {
+  const { x, y } = pointerToCanvas(event);
+  return pickHexFromPoint(x, y);
 }
 
 function setHoveredHex(hex) {
@@ -1799,6 +1883,76 @@ function setHoveredHex(hex) {
   }
   hoveredHex = hex;
   renderWorld();
+}
+
+function requestPlayerMove(hex, { mode = 'run', silentIfSame = false } = {}) {
+  if (!hex) {
+    return;
+  }
+
+  const self = getSelfPlayer();
+  if (!self) {
+    addSystemMessage('Ожидание соединения с сервером...');
+    return;
+  }
+
+  if (self.position.axial.q === hex.q && self.position.axial.r === hex.r) {
+    if (!silentIfSame) {
+      addSystemMessage('Вы уже на выбранном гексе');
+    }
+    return;
+  }
+
+  sendMoveTo(hex, { mode });
+}
+
+function clearTouchGesture(pointerId) {
+  if (
+    activeTouchGesture &&
+    typeof canvas.releasePointerCapture === 'function'
+  ) {
+    const targetId = pointerId ?? activeTouchGesture.pointerId;
+    try {
+      canvas.releasePointerCapture(targetId);
+    } catch (error) {
+      // ignore errors when pointer is not captured
+    }
+  }
+  activeTouchGesture = null;
+}
+
+function clearPendingTap() {
+  if (pendingTapTimeoutId !== null) {
+    window.clearTimeout(pendingTapTimeoutId);
+    pendingTapTimeoutId = null;
+  }
+  pendingTapHex = null;
+}
+
+function processTouchTap(event, hex) {
+  const now = performance.now();
+  const { time, x, y } = lastTapInfo;
+  const clientX = event.clientX;
+  const clientY = event.clientY;
+  const elapsed = now - time;
+  const travel = Math.hypot(clientX - x, clientY - y);
+
+  if (elapsed <= DOUBLE_TAP_DELAY_MS && travel <= TAP_MOVEMENT_THRESHOLD_PX) {
+    clearPendingTap();
+    lastTapInfo = { time: 0, x: 0, y: 0 };
+    requestPlayerMove(hex, { mode: 'run', silentIfSame: true });
+    return;
+  }
+
+  lastTapInfo = { time: now, x: clientX, y: clientY };
+  clearPendingTap();
+  pendingTapHex = hex;
+  pendingTapTimeoutId = window.setTimeout(() => {
+    if (pendingTapHex) {
+      requestPlayerMove(pendingTapHex, { mode: 'walk', silentIfSame: true });
+    }
+    clearPendingTap();
+  }, DOUBLE_TAP_DELAY_MS);
 }
 
 function angleDifference(a, b) {
@@ -1839,26 +1993,36 @@ function handleCanvasPointerDown(event) {
     return;
   }
 
+  if (event.pointerType === 'touch') {
+    if (activeTouchGesture && activeTouchGesture.pointerId !== event.pointerId) {
+      return;
+    }
+    event.preventDefault();
+    const hex = pickHexFromEvent(event);
+    if (hex) {
+      setHoveredHex(hex);
+    }
+    activeTouchGesture = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startTime: performance.now(),
+      lastHex: hex ?? null,
+      deltaX: 0,
+      deltaY: 0,
+    };
+    if (typeof canvas.setPointerCapture === 'function') {
+      try {
+        canvas.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // ignore capture errors on unsupported browsers
+      }
+    }
+    return;
+  }
+
   const hex = pickHexFromEvent(event);
-  if (!hex) {
-    return;
-  }
-
-  const self = getSelfPlayer();
-  if (!self) {
-    addSystemMessage('Ожидание соединения с сервером...');
-    return;
-  }
-
-  if (
-    self.position.axial.q === hex.q &&
-    self.position.axial.r === hex.r
-  ) {
-    addSystemMessage('Вы уже на выбранном гексе');
-    return;
-  }
-
-  sendMoveTo(hex);
+  requestPlayerMove(hex);
 }
 
 function handleCanvasPointerMove(event) {
@@ -1869,6 +2033,62 @@ function handleCanvasPointerMove(event) {
 
   const hex = pickHexFromEvent(event);
   setHoveredHex(hex);
+
+  if (
+    event.pointerType === 'touch' &&
+    activeTouchGesture &&
+    activeTouchGesture.pointerId === event.pointerId
+  ) {
+    activeTouchGesture.lastHex = hex ?? activeTouchGesture.lastHex;
+    activeTouchGesture.deltaX = event.clientX - activeTouchGesture.startClientX;
+    activeTouchGesture.deltaY = event.clientY - activeTouchGesture.startClientY;
+  }
+}
+
+function handleCanvasPointerUp(event) {
+  if (event.pointerType !== 'touch') {
+    return;
+  }
+
+  if (!activeTouchGesture || activeTouchGesture.pointerId !== event.pointerId) {
+    return;
+  }
+
+  event.preventDefault();
+  const gesture = { ...activeTouchGesture };
+  clearTouchGesture(event.pointerId);
+
+  const deltaX = gesture.deltaX ?? event.clientX - gesture.startClientX;
+  const deltaY = gesture.deltaY ?? event.clientY - gesture.startClientY;
+  const distance = Math.hypot(deltaX, deltaY);
+
+  const hex = pickHexFromEvent(event) ?? gesture.lastHex ?? null;
+
+  if (distance >= SWIPE_MIN_DISTANCE_PX && Math.abs(deltaY) > Math.abs(deltaX)) {
+    adjustMapZoom(deltaY < 0 ? 1 : -1);
+    setHoveredHex(null);
+    return;
+  }
+
+  if (!hex) {
+    setHoveredHex(null);
+    return;
+  }
+
+  if (distance <= TAP_MOVEMENT_THRESHOLD_PX) {
+    processTouchTap(event, hex);
+  }
+
+  setHoveredHex(null);
+}
+
+function handleCanvasPointerCancel(event) {
+  if (event.pointerType !== 'touch') {
+    return;
+  }
+  clearTouchGesture(event.pointerId);
+  clearPendingTap();
+  setHoveredHex(null);
 }
 
 function handleCanvasPointerLeave() {
@@ -1965,13 +2185,17 @@ function updatePlayer(player) {
   updateVisualForPlayer(player, previous);
 }
 
-function sendMoveTo(target) {
+function sendMoveTo(target, { mode } = {}) {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     addSystemMessage('Команда перемещения отклонена: нет соединения');
     return;
   }
+  const payload = { target };
+  if (mode) {
+    payload.mode = mode;
+  }
   socket.send(
-    JSON.stringify({ type: 'player:move', payload: { target } })
+    JSON.stringify({ type: 'player:move', payload })
   );
 }
 
@@ -2018,11 +2242,13 @@ window.addEventListener('keydown', event => {
     q: self.position.axial.q + vector.q,
     r: self.position.axial.r + vector.r,
   };
-  sendMoveTo(target);
+  sendMoveTo(target, { mode: 'run' });
 });
 
 canvas.addEventListener('pointerdown', handleCanvasPointerDown);
 canvas.addEventListener('pointermove', handleCanvasPointerMove);
+canvas.addEventListener('pointerup', handleCanvasPointerUp);
+canvas.addEventListener('pointercancel', handleCanvasPointerCancel);
 canvas.addEventListener('pointerleave', handleCanvasPointerLeave);
 
 if (chatFormEl && chatInputEl) {
@@ -2087,6 +2313,7 @@ if (overlayLayerEl) {
 }
 
 window.addEventListener('resize', () => {
+  updateInputModeClass();
   renderWorld();
 });
 
