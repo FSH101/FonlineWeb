@@ -105,7 +105,7 @@ docker run --rm -p 8080:8080 --env DATABASE_URL=... fonlineweb
 3. **Подтвердите использование `render.yaml`.** Render обнаружит файл конфигурации и предложит создать инфраструктуру из него. Убедитесь, что в предварительном просмотре выбран сервис `fonlineweb` с типом `web service` и источником `Dockerfile`.
 4. **Проверьте параметры сборки.** Для веб-сервиса убедитесь, что:
    - `Runtime` установлен в `Docker` (Render подставит это автоматически);
-   - поле **Dockerfile Path** содержит ровно `Dockerfile` (без `./` и других каталогов). Любое другое значение заставит Render искать Dockerfile в каталоге `src`, что приводит к ошибке `failed to read dockerfile: .../src: is a directory`;
+   - поле **Dockerfile Path** содержит `Dockerfile`. Render по умолчанию подставляет значение `src`; в репозитории добавлена символьная ссылка `src → Dockerfile`, поэтому сборка всё равно завершится успешно, но рекомендуется вручную заменить значение на `Dockerfile`, чтобы избежать неоднозначности в UI;
    - `Docker Build Context Directory` указывает на корень репозитория (`.`). Это значение также зашито в [`render.yaml`](render.yaml) через поле `dockerContext`;
    - `Build Command` — `docker build ...` (Render формирует команду сам на основе `Dockerfile`);
    - `Start Command` пустой — в `Dockerfile` уже задан `CMD`.
