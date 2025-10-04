@@ -22,6 +22,18 @@ const chatLogEl = document.getElementById('chatLog');
 const chatFormEl = document.getElementById('chatForm');
 const chatInputEl = document.getElementById('chatInput');
 const commandBarEl = document.getElementById('commandBar');
+const overlayLayerEl = document.getElementById('overlayLayer');
+
+const overlayPanels = overlayLayerEl
+  ? new Map(
+      Array.from(overlayLayerEl.querySelectorAll('[data-panel]')).map(panel => [
+        panel.dataset.panel,
+        panel,
+      ])
+    )
+  : new Map();
+
+let activeOverlay = null;
 
 const canvas = document.getElementById('hexCanvas');
 const ctx = canvas.getContext('2d');
@@ -224,6 +236,60 @@ function addActionFeedback(action) {
   addSystemMessage(`Действие «${action}» пока не реализовано`);
 }
 
+function setOverlayVisibility(isVisible) {
+  if (!overlayLayerEl) {
+    return;
+  }
+  overlayLayerEl.classList.toggle('overlay-layer--active', isVisible);
+  overlayLayerEl.setAttribute('aria-hidden', String(!isVisible));
+}
+
+function closeOverlay({ silent = false } = {}) {
+  if (!overlayLayerEl || !activeOverlay) {
+    return null;
+  }
+
+  const panel = overlayPanels.get(activeOverlay) ?? null;
+  overlayPanels.forEach(el => {
+    el.hidden = true;
+    el.setAttribute('aria-hidden', 'true');
+  });
+  activeOverlay = null;
+  setOverlayVisibility(false);
+
+  if (panel && !silent) {
+    return panel.dataset.title ?? panel.dataset.panel ?? null;
+  }
+  return null;
+}
+
+function openOverlay(panelName) {
+  if (!overlayLayerEl || !panelName) {
+    return null;
+  }
+
+  const panel = overlayPanels.get(panelName);
+  if (!panel) {
+    return null;
+  }
+
+  overlayPanels.forEach(el => {
+    const isTarget = el === panel;
+    el.hidden = !isTarget;
+    el.setAttribute('aria-hidden', String(!isTarget));
+  });
+
+  activeOverlay = panelName;
+  setOverlayVisibility(true);
+
+  const focusTarget = panel.querySelector('[data-role="close"]') ?? panel;
+  if (focusTarget && typeof focusTarget.focus === 'function') {
+    focusTarget.focus();
+  }
+
+  return panel.dataset.title ?? panel.dataset.panel ?? null;
+}
+
 function getSelfPlayer() {
   return worldState.selfId
     ? worldState.players.get(worldState.selfId) ?? null
@@ -292,6 +358,10 @@ function axialDeltaToDirection(from, to) {
 }
 
 function handleCanvasPointerDown(event) {
+  if (activeOverlay) {
+    return;
+  }
+
   const hex = pickHexFromEvent(event);
   if (!hex) {
     return;
@@ -405,6 +475,18 @@ function sendMove(direction) {
 }
 
 window.addEventListener('keydown', event => {
+  if (event.code === 'Escape' && activeOverlay) {
+    const closedTitle = closeOverlay();
+    if (closedTitle) {
+      addSystemMessage(`Закрыто окно «${closedTitle}»`);
+    }
+    return;
+  }
+
+  if (activeOverlay) {
+    return;
+  }
+
   if (!event.code.startsWith('Key')) return;
   const direction = {
     KeyQ: 'northWest',
@@ -442,8 +524,43 @@ if (commandBarEl) {
       return;
     }
     const action = button.dataset.action;
-    if (action) {
-      addActionFeedback(button.textContent?.trim() ?? action);
+    if (!action) {
+      return;
+    }
+
+    const label = button.textContent?.trim() ?? action;
+    if (activeOverlay === action) {
+      const closedTitle = closeOverlay();
+      if (closedTitle) {
+        addSystemMessage(`Закрыто окно «${closedTitle}»`);
+      }
+      return;
+    }
+
+    const openedTitle = openOverlay(action);
+    if (openedTitle) {
+      addSystemMessage(`Открыто окно «${openedTitle}»`);
+    } else {
+      addActionFeedback(label);
+    }
+  });
+}
+
+if (overlayLayerEl) {
+  overlayLayerEl.addEventListener('click', event => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    if (
+      target.dataset.role === 'close' ||
+      target.dataset.role === 'overlay-backdrop'
+    ) {
+      const closedTitle = closeOverlay();
+      if (closedTitle) {
+        addSystemMessage(`Закрыто окно «${closedTitle}»`);
+      }
     }
   });
 }

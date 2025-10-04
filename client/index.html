@@ -23,31 +23,87 @@
             </div>
           </div>
         </header>
-        <div class="hud-middle">
-          <section class="hud-center panel" aria-label="Характеристики бойца">
-            <h2 class="panel__title">Характеристики бойца</h2>
-            <ul class="stat-list">
-              <li>
-                <span class="stat-label">Здоровье</span>
-                <span class="stat-value" id="hpStat">42 / 60</span>
-              </li>
-              <li>
-                <span class="stat-label">Очки действия</span>
-                <span class="stat-value" id="apStat">7 / 9</span>
-              </li>
-              <li>
-                <span class="stat-label">Сила</span>
-                <span class="stat-value">5</span>
-              </li>
-              <li>
-                <span class="stat-label">Ловкость</span>
-                <span class="stat-value">7</span>
-              </li>
-              <li>
-                <span class="stat-label">Восприятие</span>
-                <span class="stat-value">6</span>
-              </li>
-            </ul>
+        <div
+          class="overlay-layer"
+          id="overlayLayer"
+          aria-live="polite"
+          aria-hidden="true"
+        >
+          <div class="overlay-backdrop" data-role="overlay-backdrop"></div>
+          <section
+            class="hud-overlay panel"
+            data-panel="inventory"
+            data-title="Инвентарь"
+            hidden
+            tabindex="-1"
+          >
+            <header class="panel__title">Инвентарь</header>
+            <p class="overlay__description">
+              Здесь будет список предметов и управление экипировкой персонажа.
+            </p>
+            <button type="button" class="overlay__close" data-role="close">
+              Закрыть
+            </button>
+          </section>
+          <section
+            class="hud-overlay panel"
+            data-panel="map"
+            data-title="Карта"
+            hidden
+            tabindex="-1"
+          >
+            <header class="panel__title">Карта</header>
+            <p class="overlay__description">
+              Заготовка для отображения глобальной и локальной карт мира.
+            </p>
+            <button type="button" class="overlay__close" data-role="close">
+              Закрыть
+            </button>
+          </section>
+          <section
+            class="hud-overlay panel"
+            data-panel="settings"
+            data-title="Настройки"
+            hidden
+            tabindex="-1"
+          >
+            <header class="panel__title">Настройки</header>
+            <p class="overlay__description">
+              Позже здесь появятся параметры графики, управления и звука.
+            </p>
+            <button type="button" class="overlay__close" data-role="close">
+              Закрыть
+            </button>
+          </section>
+          <section
+            class="hud-overlay panel"
+            data-panel="character"
+            data-title="Персонаж"
+            hidden
+            tabindex="-1"
+          >
+            <header class="panel__title">Персонаж</header>
+            <p class="overlay__description">
+              Здесь появятся характеристики, навыки и активные эффекты героя.
+            </p>
+            <button type="button" class="overlay__close" data-role="close">
+              Закрыть
+            </button>
+          </section>
+          <section
+            class="hud-overlay panel"
+            data-panel="equipment"
+            data-title="Экипировка"
+            hidden
+            tabindex="-1"
+          >
+            <header class="panel__title">Экипировка</header>
+            <p class="overlay__description">
+              Планируется управление слотами брони, оружия и быстрого доступа.
+            </p>
+            <button type="button" class="overlay__close" data-role="close">
+              Закрыть
+            </button>
           </section>
         </div>
         <footer class="hud-bottom">

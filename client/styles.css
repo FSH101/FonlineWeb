@@ -55,6 +55,7 @@ canvas {
   flex-direction: column;
   justify-content: space-between;
   padding: var(--hud-gap);
+  z-index: 2;
 }
 
 .panel {
@@ -128,52 +129,65 @@ canvas {
   color: var(--danger);
 }
 
-.hud-middle {
-  display: flex;
-  justify-content: center;
-  padding: 0 var(--hud-gap);
+
+.overlay-layer {
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-items: center;
+  pointer-events: none;
+  z-index: 3;
 }
 
-.hud-center {
-  padding: clamp(1.5rem, 4vw, 2.75rem);
-  min-width: clamp(260px, 30vw, 420px);
-  text-align: center;
-}
-
-.stat-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
+.overlay-layer--active {
   display: grid;
-  gap: 0.85rem;
-  font-size: 0.95rem;
+  pointer-events: auto;
 }
 
-.hud-center .stat-list li {
-  padding: 0.75rem 1rem;
-  border: 1px solid rgba(192, 255, 86, 0.25);
-  border-radius: 10px;
-  background: rgba(12, 24, 15, 0.65);
+.overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
   backdrop-filter: blur(2px);
 }
 
-.stat-list .stat-label {
-  text-transform: uppercase;
-  font-size: 0.75rem;
-  letter-spacing: 0.08em;
+.hud-overlay {
+  position: relative;
+  width: min(520px, 90vw);
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  display: grid;
+  gap: 1.25rem;
+  text-align: left;
+  z-index: 1;
+}
+
+.hud-overlay[hidden] {
+  display: none;
+}
+
+.overlay__description {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
   color: var(--text-secondary);
 }
 
-.stat-list .stat-value {
-  display: block;
-  font-family: 'Roboto Mono', 'Fira Code', monospace;
-  font-size: 1.05rem;
-  margin-top: 0.35rem;
+.overlay__close {
+  justify-self: end;
+  padding: 0.5rem 1.25rem;
+  border-radius: 8px;
+  border: 1px solid rgba(192, 255, 86, 0.4);
+  background: rgba(192, 255, 86, 0.12);
+  color: var(--accent);
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  cursor: pointer;
 }
 
-.hud-center .stat-list .stat-label,
-.hud-center .stat-list .stat-value {
-  text-align: center;
+.overlay__close:hover,
+.overlay__close:focus {
+  background: rgba(192, 255, 86, 0.25);
 }
 
 .hud-bottom {
