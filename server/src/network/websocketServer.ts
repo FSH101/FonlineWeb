@@ -3,7 +3,7 @@ import { WebSocketServer, WebSocket, RawData } from 'ws';
 import { Server } from 'http';
 import { logger } from '../logger';
 import { GameWorld, SerializedPlayerState } from '../world/gameWorld';
-import { HexDirection, isHexDirection } from '../world/hex';
+import { isAxialCoordinate } from '../world/hex';
 
 export type ClientContext = {
   id: string;
@@ -82,7 +82,7 @@ export class GameWebSocketServer {
     }
 
     if (parsed.type === 'player:move') {
-      this.handleMove(context, parsed.payload?.direction);
+      this.handleMove(context, parsed.payload?.target);
       return;
     }
 
@@ -103,7 +103,7 @@ export class GameWebSocketServer {
   ): message is
     | {
         type: 'player:move';
-        payload?: { direction?: unknown };
+        payload?: { target?: unknown };
       }
     | {
         type: 'player:setName';
@@ -125,16 +125,16 @@ export class GameWebSocketServer {
     }
   }
 
-  private handleMove(context: ClientContext, direction: unknown) {
-    if (!isHexDirection(direction)) {
+  private handleMove(context: ClientContext, target: unknown) {
+    if (!isAxialCoordinate(target)) {
       this.send(context, {
         type: 'world:error',
-        payload: { message: 'Неизвестное направление' },
+        payload: { message: 'Некорректная цель перемещения' },
       });
       return;
     }
 
-    const result = this.world.movePlayer(context.id, direction);
+    const result = this.world.movePlayerTo(context.id, target);
     if (!result) {
       this.send(context, {
         type: 'world:error',

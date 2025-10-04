@@ -37,6 +37,14 @@ export function isHexDirection(value: unknown): value is HexDirection {
   return typeof value === 'string' && value in HEX_DIRECTION_VECTORS;
 }
 
+export function isAxialCoordinate(value: unknown): value is AxialCoordinate {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<AxialCoordinate>;
+  return Number.isInteger(candidate.q) && Number.isInteger(candidate.r);
+}
+
 export function addAxial(
   a: AxialCoordinate,
   b: AxialCoordinate

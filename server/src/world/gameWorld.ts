@@ -1,12 +1,5 @@
 import { logger } from '../logger';
-import {
-  AxialCoordinate,
-  HexDirection,
-  HEX_DIRECTION_VECTORS,
-  axialToOffset,
-  addAxial,
-  offsetToAxial,
-} from './hex';
+import { AxialCoordinate, axialToOffset, offsetToAxial } from './hex';
 import { HexGrid, SerializedHexGrid } from './hexGrid';
 
 export interface PlayerState {
@@ -65,24 +58,22 @@ export class GameWorld {
     }
   }
 
-  movePlayer(id: string, direction: HexDirection): SerializedPlayerState | null {
+  movePlayerTo(id: string, target: AxialCoordinate): SerializedPlayerState | null {
     const player = this.players.get(id);
     if (!player) {
       return null;
     }
 
-    const vector = HEX_DIRECTION_VECTORS[direction];
-    const candidate = addAxial(player.position, vector);
-    if (!this.grid.isInsideAxial(candidate)) {
+    if (!this.grid.isInsideAxial(target)) {
       return null;
     }
 
-    const tile = this.grid.getTileByAxial(candidate);
+    const tile = this.grid.getTileByAxial(target);
     if (!tile || !tile.walkable) {
       return null;
     }
 
-    player.position = candidate;
+    player.position = { ...target };
     return this.serializePlayer(player);
   }
 

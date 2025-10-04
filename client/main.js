@@ -1,24 +1,24 @@
 import { loadUiConfig } from './ui/configLoader.js';
 import { tryLoadAnimation } from './player/heroSprite.js';
 
-const HEX_SIZE = 12;
+const HEX_SIZE = 24;
 const SQRT3 = Math.sqrt(3);
 
 const DIRECTION_VECTORS = {
+  southEast: { q: 0, r: 1 },
   east: { q: 1, r: 0 },
   northEast: { q: 1, r: -1 },
   northWest: { q: 0, r: -1 },
   west: { q: -1, r: 0 },
   southWest: { q: -1, r: 1 },
-  southEast: { q: 0, r: 1 },
 };
 
-const vectorDirectionLookup = new Map(
-  Object.entries(DIRECTION_VECTORS).map(([direction, vector]) => [
-    `${vector.q}:${vector.r}`,
-    direction,
-  ])
-);
+const DIRECTION_METADATA = Object.entries(DIRECTION_VECTORS).map(([name, vector]) => {
+  const px = SQRT3 * (vector.q + vector.r / 2);
+  const py = 1.5 * vector.r;
+  const angle = Math.atan2(py, px);
+  return { name, angle };
+});
 
 const connectionStatusEl = document.getElementById('connectionStatus');
 const chatLogEl = document.getElementById('chatLog');
@@ -69,7 +69,7 @@ const fallbackUiConfig = {
   Player: {
     RunAnimation: 'player/assets/human_female/HFCMBTAB',
     IdleAnimation: 'player/assets/human_female/HFCMBTAA',
-    DirectionOrder: 'southEast, east, northEast, northWest, west, southWest',
+    DirectionOrder: 'northEast, east, southEast, southWest, west, northWest',
     MoveDuration: '280',
     Scale: '2',
     OffsetX: '0',
@@ -156,7 +156,7 @@ let uiConfig = null;
 const DEFAULT_PLAYER_SETTINGS = {
   runPath: 'player/assets/human_female/HFCMBTAB',
   idlePath: 'player/assets/human_female/HFCMBTAA',
-  directionOrder: ['southEast', 'east', 'northEast', 'northWest', 'west', 'southWest'],
+  directionOrder: ['northEast', 'east', 'southEast', 'southWest', 'west', 'northWest'],
   moveDuration: 280,
   scale: 2,
   offsetX: 0,
@@ -794,6 +794,7 @@ function ensurePlayerVisual(player, center) {
       currentPosition: { ...basePosition },
       startPosition: { ...basePosition },
       targetPosition: { ...basePosition },
+      finalPosition: { ...basePosition },
       moveStartTime: performance.now(),
       moveDuration: playerSettings.moveDuration,
       moving: false,
@@ -801,10 +802,53 @@ function ensurePlayerVisual(player, center) {
       frameTimer: 0,
       currentAnimation: 'idle',
       facingDirection: playerSettings.defaultFacing,
+      pendingWaypoints: [],
+      currentTargetAxial: null,
+      motionAxial: { ...player.position.axial },
     };
     playerVisuals.set(player.id, visual);
   }
+  if (!visual.finalPosition) {
+    visual.finalPosition = { ...visual.targetPosition };
+  }
+  if (!Array.isArray(visual.pendingWaypoints)) {
+    visual.pendingWaypoints = [];
+  }
+  if (!visual.motionAxial) {
+    visual.motionAxial = { ...player.position.axial };
+  }
+  if (!('currentTargetAxial' in visual)) {
+    visual.currentTargetAxial = null;
+  }
   return visual;
+}
+
+function advanceVisualWaypoint(visual, timestamp) {
+  if (!Array.isArray(visual.pendingWaypoints) || visual.pendingWaypoints.length === 0) {
+    visual.moving = false;
+    visual.currentTargetAxial = null;
+    visual.startPosition = { ...visual.finalPosition };
+    visual.targetPosition = { ...visual.finalPosition };
+    visual.currentPosition = { ...visual.finalPosition };
+    visual.moveStartTime = timestamp;
+    visual.motionAxial = { ...visual.axial };
+    return false;
+  }
+
+  const next = visual.pendingWaypoints.shift();
+  visual.currentTargetAxial = { ...next.axial };
+  visual.startPosition = { ...visual.currentPosition };
+  visual.targetPosition = { ...next.position };
+  visual.moveStartTime = timestamp;
+  visual.moveDuration = playerSettings.moveDuration;
+  visual.moving = true;
+
+  const direction = axialDeltaToDirection(visual.motionAxial, next.axial);
+  if (direction) {
+    visual.facingDirection = direction;
+  }
+
+  return true;
 }
 
 function updateVisualForPlayer(player, previous = null) {
@@ -815,24 +859,16 @@ function updateVisualForPlayer(player, previous = null) {
 
   const visual = ensurePlayerVisual(player, center);
   visual.axial = { ...player.position.axial };
-  visual.targetPosition = { x: center.x, y: center.y };
+  visual.finalPosition = { x: center.x, y: center.y };
 
   const now = performance.now();
 
-  let direction = visual.facingDirection;
-  if (previous) {
-    const computedDirection = axialDeltaToDirection(previous.position.axial, player.position.axial);
-    if (computedDirection) {
-      direction = computedDirection;
-    }
-  }
-  if (direction) {
-    visual.facingDirection = direction;
-  }
-
   if (!previous) {
-    visual.startPosition = { ...visual.targetPosition };
-    visual.currentPosition = { ...visual.targetPosition };
+    visual.pendingWaypoints = [];
+    visual.motionAxial = { ...player.position.axial };
+    visual.startPosition = { ...visual.finalPosition };
+    visual.currentPosition = { ...visual.finalPosition };
+    visual.targetPosition = { ...visual.finalPosition };
     visual.moving = false;
     visual.moveDuration = playerSettings.moveDuration;
     setVisualAnimation(visual, 'idle');
@@ -851,19 +887,64 @@ function updateVisualForPlayer(player, previous = null) {
       ? { x: prevCenter.x, y: prevCenter.y }
       : { ...visual.currentPosition };
 
-    visual.startPosition = startPosition;
+    const axialPath = computeHexLine(previous.position.axial, player.position.axial);
+    const waypoints = [];
+    for (const axial of axialPath) {
+      const waypointCenter = getTileCenter(axial);
+      if (!waypointCenter) {
+        continue;
+      }
+      waypoints.push({
+        axial,
+        position: { x: waypointCenter.x, y: waypointCenter.y },
+      });
+    }
+
+    if (waypoints.length === 0) {
+      visual.pendingWaypoints = [];
+      visual.motionAxial = { ...player.position.axial };
+      visual.startPosition = startPosition;
+      visual.currentPosition = { ...startPosition };
+      visual.targetPosition = { ...visual.finalPosition };
+      visual.currentTargetAxial = null;
+      visual.moveStartTime = now;
+      const steps = Math.max(
+        axialDistance(previous.position.axial, player.position.axial),
+        1
+      );
+      visual.moveDuration = playerSettings.moveDuration * steps;
+      visual.moving = true;
+      const fallbackDirection = axialDeltaToDirection(
+        previous.position.axial,
+        player.position.axial
+      );
+      if (fallbackDirection) {
+        visual.facingDirection = fallbackDirection;
+      }
+      setVisualAnimation(visual, 'run');
+      return;
+    }
+
+    visual.pendingWaypoints = waypoints;
+    visual.motionAxial = { ...previous.position.axial };
     visual.currentPosition = { ...startPosition };
-    visual.moveStartTime = now;
-    visual.moveDuration = playerSettings.moveDuration;
-    visual.moving = true;
-    setVisualAnimation(visual, 'run');
-  } else {
-    visual.startPosition = { ...visual.targetPosition };
-    visual.currentPosition = { ...visual.targetPosition };
-    visual.moving = false;
-    visual.moveDuration = playerSettings.moveDuration;
-    setVisualAnimation(visual, 'idle');
+    visual.startPosition = { ...startPosition };
+    visual.currentTargetAxial = null;
+    visual.targetPosition = { ...visual.currentPosition };
+    const started = advanceVisualWaypoint(visual, now);
+    setVisualAnimation(visual, started ? 'run' : 'idle');
+    return;
   }
+
+  visual.pendingWaypoints = [];
+  visual.motionAxial = { ...player.position.axial };
+  visual.startPosition = { ...visual.finalPosition };
+  visual.currentPosition = { ...visual.finalPosition };
+  visual.targetPosition = { ...visual.finalPosition };
+  visual.currentTargetAxial = null;
+  visual.moving = false;
+  visual.moveDuration = playerSettings.moveDuration;
+  setVisualAnimation(visual, 'idle');
 }
 
 function synchronizeVisualsWithWorld() {
@@ -911,7 +992,7 @@ function drawHexTile(centerX, centerY, variant = 0) {
   ctx.fillStyle = basePalette[idx];
   ctx.fill();
 
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = Math.max(HEX_SIZE * 0.12, 1.5);
   ctx.strokeStyle = '#1a1208';
   ctx.stroke();
 
@@ -933,13 +1014,13 @@ function drawHexTile(centerX, centerY, variant = 0) {
   ctx.restore();
 }
 
-function drawHighlight(centerX, centerY, color, lineWidth = 2.5) {
+function drawHighlight(centerX, centerY, color, lineWidth = HEX_SIZE * 0.18) {
   ctx.save();
   hexPath(centerX, centerY, HEX_SIZE * 0.94);
   ctx.lineWidth = lineWidth;
   ctx.strokeStyle = color;
   ctx.shadowColor = color;
-  ctx.shadowBlur = 8;
+  ctx.shadowBlur = Math.max(HEX_SIZE * 0.35, 8);
   ctx.stroke();
   ctx.restore();
 }
@@ -951,7 +1032,7 @@ function drawPlayerFallback(centerX, centerY, isSelf) {
   ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
   ctx.fillStyle = isSelf ? '#c0ff56' : '#64a9ff';
   ctx.fill();
-  ctx.lineWidth = 2;
+  ctx.lineWidth = Math.max(HEX_SIZE * 0.1, 2);
   ctx.strokeStyle = '#0d1208';
   ctx.stroke();
   ctx.restore();
@@ -1040,15 +1121,35 @@ function updateAnimationStates(delta, timestamp) {
       const duration = Math.max(visual.moveDuration, 1);
       const elapsed = timestamp - visual.moveStartTime;
       const t = Math.min(elapsed / duration, 1);
-      const nextX = visual.startPosition.x + (visual.targetPosition.x - visual.startPosition.x) * t;
-      const nextY = visual.startPosition.y + (visual.targetPosition.y - visual.startPosition.y) * t;
+      const nextX =
+        visual.startPosition.x + (visual.targetPosition.x - visual.startPosition.x) * t;
+      const nextY =
+        visual.startPosition.y + (visual.targetPosition.y - visual.startPosition.y) * t;
       visual.currentPosition = { x: nextX, y: nextY };
       if (t >= 1) {
         visual.moving = false;
         visual.currentPosition = { ...visual.targetPosition };
+        if (visual.currentTargetAxial) {
+          visual.motionAxial = { ...visual.currentTargetAxial };
+          visual.currentTargetAxial = null;
+        }
+        const started = advanceVisualWaypoint(visual, timestamp);
+        if (!started) {
+          visual.currentPosition = { ...visual.finalPosition };
+        }
+      }
+    } else if (
+      Array.isArray(visual.pendingWaypoints) &&
+      visual.pendingWaypoints.length > 0 &&
+      !visual.currentTargetAxial
+    ) {
+      const started = advanceVisualWaypoint(visual, timestamp);
+      if (!started) {
+        visual.currentPosition = { ...visual.finalPosition };
       }
     } else {
-      visual.currentPosition = { ...visual.targetPosition };
+      visual.currentPosition = { ...visual.finalPosition };
+      visual.targetPosition = { ...visual.finalPosition };
     }
 
     const desiredAnimation = visual.moving ? 'run' : 'idle';
@@ -1149,7 +1250,7 @@ function renderWorld() {
     const key = axialKey(self.position.axial.q, self.position.axial.r);
     const center = layout.tileCenters.get(key);
     if (center) {
-      drawHighlight(center.x, center.y, '#89ff3c', 3);
+      drawHighlight(center.x, center.y, '#89ff3c');
     }
   }
 
@@ -1345,6 +1446,68 @@ function hexRound(q, r) {
   return { q: rx, r: rz };
 }
 
+function axialDistance(a, b) {
+  const dq = a.q - b.q;
+  const dr = a.r - b.r;
+  const ds = -dq - dr;
+  return Math.round((Math.abs(dq) + Math.abs(dr) + Math.abs(ds)) / 2);
+}
+
+function axialToCube(axial) {
+  return { x: axial.q, y: -axial.q - axial.r, z: axial.r };
+}
+
+function cubeToAxial(cube) {
+  return { q: cube.x, r: cube.z };
+}
+
+function cubeLerp(a, b, t) {
+  return {
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+    z: a.z + (b.z - a.z) * t,
+  };
+}
+
+function cubeRound(cube) {
+  let rx = Math.round(cube.x);
+  let ry = Math.round(cube.y);
+  let rz = Math.round(cube.z);
+
+  const xDiff = Math.abs(rx - cube.x);
+  const yDiff = Math.abs(ry - cube.y);
+  const zDiff = Math.abs(rz - cube.z);
+
+  if (xDiff > yDiff && xDiff > zDiff) {
+    rx = -ry - rz;
+  } else if (yDiff > zDiff) {
+    ry = -rx - rz;
+  } else {
+    rz = -rx - ry;
+  }
+
+  return { x: rx, y: ry, z: rz };
+}
+
+function computeHexLine(from, to) {
+  const distance = axialDistance(from, to);
+  if (distance === 0) {
+    return [];
+  }
+
+  const fromCube = axialToCube(from);
+  const toCube = axialToCube(to);
+  const line = [];
+
+  for (let step = 1; step <= distance; step += 1) {
+    const t = step / distance;
+    const interpolated = cubeLerp(fromCube, toCube, t);
+    line.push(cubeToAxial(cubeRound(interpolated)));
+  }
+
+  return line;
+}
+
 function pickHexFromEvent(event) {
   const { x, y } = pointerToCanvas(event);
   const candidate = pixelToAxial(x, y);
@@ -1354,13 +1517,37 @@ function pickHexFromEvent(event) {
   return candidate;
 }
 
+function angleDifference(a, b) {
+  const diff = a - b;
+  return Math.atan2(Math.sin(diff), Math.cos(diff));
+}
+
 function axialDeltaToDirection(from, to) {
   const dq = to.q - from.q;
   const dr = to.r - from.r;
   if (dq === 0 && dr === 0) {
     return null;
   }
-  return vectorDirectionLookup.get(`${dq}:${dr}`) ?? null;
+
+  const px = SQRT3 * (dq + dr / 2);
+  const py = 1.5 * dr;
+  if (px === 0 && py === 0) {
+    return null;
+  }
+
+  const directionAngle = Math.atan2(py, px);
+
+  let bestDirection = null;
+  let smallestDelta = Infinity;
+  for (const { name, angle } of DIRECTION_METADATA) {
+    const delta = Math.abs(angleDifference(directionAngle, angle));
+    if (delta < smallestDelta) {
+      smallestDelta = delta;
+      bestDirection = name;
+    }
+  }
+
+  return bestDirection;
 }
 
 function handleCanvasPointerDown(event) {
@@ -1379,13 +1566,15 @@ function handleCanvasPointerDown(event) {
     return;
   }
 
-  const direction = axialDeltaToDirection(self.position.axial, hex);
-  if (!direction) {
-    addSystemMessage('Можно перемещаться только на соседние гексы');
+  if (
+    self.position.axial.q === hex.q &&
+    self.position.axial.r === hex.r
+  ) {
+    addSystemMessage('Вы уже на выбранном гексе');
     return;
   }
 
-  sendMove(direction);
+  sendMoveTo(hex);
 }
 
 function connect() {
@@ -1465,7 +1654,7 @@ function handleInit(payload) {
   synchronizeVisualsWithWorld();
   renderWorld();
   addSystemMessage('Вы появились в центре пустоши');
-  addSystemMessage('Кликните по соседнему гексу, чтобы переместиться');
+  addSystemMessage('Кликните по любому гексу, чтобы переместиться');
 }
 
 function updatePlayer(player) {
@@ -1474,13 +1663,13 @@ function updatePlayer(player) {
   updateVisualForPlayer(player, previous);
 }
 
-function sendMove(direction) {
+function sendMoveTo(target) {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     addSystemMessage('Команда перемещения отклонена: нет соединения');
     return;
   }
   socket.send(
-    JSON.stringify({ type: 'player:move', payload: { direction } })
+    JSON.stringify({ type: 'player:move', payload: { target } })
   );
 }
 
@@ -1517,7 +1706,17 @@ window.addEventListener('keydown', event => {
     return;
   }
   event.preventDefault();
-  sendMove(direction);
+  const self = getSelfPlayer();
+  if (!self) {
+    addSystemMessage('Ожидание соединения с сервером...');
+    return;
+  }
+  const vector = DIRECTION_VECTORS[direction];
+  const target = {
+    q: self.position.axial.q + vector.q,
+    r: self.position.axial.r + vector.r,
+  };
+  sendMoveTo(target);
 });
 
 canvas.addEventListener('pointerdown', handleCanvasPointerDown);
