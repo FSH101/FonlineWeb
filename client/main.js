@@ -46,8 +46,9 @@ const fallbackUiConfig = {
   HUD: {
     Padding: '24',
     BottomGap: '18',
-    OverlayWidth: '520',
-    OverlayMaxHeight: '420',
+    OverlayWidth: '760',
+    OverlayMaxHeight: '620',
+    OverlayPadding: '32',
   },
   Chat: {
     Title: 'Чат',
@@ -117,10 +118,17 @@ const fallbackUiConfig = {
         'Добавим переключатели качества и громкости; Управление горячими клавишами будет редактируемым.',
     },
     character: {
-      Title: 'Персонаж',
-      Description: 'Здесь появятся характеристики, навыки и активные эффекты героя.',
-      Notes:
-        'Отображение S.P.E.C.I.A.L. и перков в разработке; Будет добавлена панель состояний и травм.',
+      Title: 'Прицельная атака',
+      DisplayCaption: 'Сканер цели',
+      LeftTargets:
+        'head|В голову|95%; eyes|В глаза|85%; rightArm|В правую руку|65%; rightLeg|В правую ногу|60%',
+      RightTargets:
+        'torso|В корпус|75%; groin|В пах|55%; leftArm|В левую руку|65%; leftLeg|В левую ногу|60%',
+      ConsolePrimary: 'Выберите часть тела для точечного удара.',
+      ConsoleSecondary:
+        'Шанс попадания зависит от навыков, расстояния и состояния оружия.',
+      ConsoleStats: 'ОД|4; Шанс|—; Оружие|Прототип',
+      ConsoleFooter: 'Доступно только для оружия с прицельной атакой.',
     },
     equipment: {
       Title: 'Экипировка',
@@ -203,6 +211,228 @@ function setCssVariable(name, value) {
     return;
   }
   document.documentElement.style.setProperty(name, normalized);
+}
+
+function parseTargetList(value, fallback = []) {
+  if (value === undefined || value === null || value === '') {
+    return fallback.map(target => ({ ...target }));
+  }
+
+  return String(value)
+    .split(/[\n;]+/)
+    .map(part => part.trim())
+    .filter(Boolean)
+    .map(entry => {
+      const [rawId, rawLabel, rawChance] = entry.split('|').map(piece => piece.trim());
+      const label = rawLabel || rawId || '';
+      const sanitizedId = rawId || label.toLowerCase().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'target';
+      const chance = rawChance || '';
+      return {
+        id: sanitizedId,
+        label: label || sanitizedId,
+        chance,
+      };
+    });
+}
+
+function parseKeyValuePairs(value, fallback = []) {
+  if (value === undefined || value === null || value === '') {
+    return fallback.map(pair => ({ ...pair }));
+  }
+
+  return String(value)
+    .split(/[\n;]+/)
+    .map(part => part.trim())
+    .filter(Boolean)
+    .map(entry => {
+      const [rawLabel, rawValue] = entry.split('|').map(piece => piece.trim());
+      return {
+        label: rawLabel || '',
+        value: rawValue || '',
+      };
+    });
+}
+
+function createCharacterTargetButton(definition) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'character-target';
+  button.dataset.role = 'body-target';
+
+  if (definition.id) {
+    button.dataset.target = definition.id;
+  }
+  if (definition.label) {
+    button.dataset.label = definition.label;
+  }
+  if (definition.chance) {
+    button.dataset.chance = definition.chance;
+  }
+
+  const labelSpan = document.createElement('span');
+  labelSpan.className = 'character-target__label';
+  labelSpan.textContent = definition.label ?? definition.id ?? '';
+  button.appendChild(labelSpan);
+
+  if (definition.chance) {
+    const chanceSpan = document.createElement('span');
+    chanceSpan.className = 'character-target__chance';
+    chanceSpan.textContent = definition.chance;
+    button.appendChild(chanceSpan);
+  }
+
+  return button;
+}
+
+function buildCharacterOverlay(section, panelConfig = {}) {
+  const overlay = document.createElement('div');
+  overlay.className = 'character-overlay';
+
+  const frame = document.createElement('div');
+  frame.className = 'character-overlay__frame';
+
+  const caption = panelConfig.DisplayCaption ?? 'Сканер цели';
+  if (caption) {
+    const captionEl = document.createElement('div');
+    captionEl.className = 'character-overlay__display-header';
+    captionEl.textContent = caption;
+    frame.appendChild(captionEl);
+  }
+
+  const display = document.createElement('div');
+  display.className = 'character-overlay__display';
+
+  const defaultLeftTargets = [
+    { id: 'head', label: 'В голову', chance: '95%' },
+    { id: 'eyes', label: 'В глаза', chance: '85%' },
+    { id: 'right-arm', label: 'В правую руку', chance: '65%' },
+    { id: 'right-leg', label: 'В правую ногу', chance: '60%' },
+  ];
+  const leftTargets = parseTargetList(panelConfig.LeftTargets, defaultLeftTargets);
+  const leftList = document.createElement('div');
+  leftList.className = 'character-overlay__targets character-overlay__targets--left';
+  leftTargets.forEach(target => {
+    leftList.appendChild(createCharacterTargetButton(target));
+  });
+  display.appendChild(leftList);
+
+  const grid = document.createElement('div');
+  grid.className = 'character-overlay__grid';
+  const figure = document.createElement('div');
+  figure.className = 'character-overlay__figure';
+  ['arms', 'legs'].forEach(kind => {
+    const limb = document.createElement('span');
+    limb.className = `character-overlay__limb character-overlay__limb--${kind}`;
+    figure.appendChild(limb);
+  });
+  grid.appendChild(figure);
+  display.appendChild(grid);
+
+  const defaultRightTargets = [
+    { id: 'torso', label: 'В корпус', chance: '75%' },
+    { id: 'groin', label: 'В пах', chance: '55%' },
+    { id: 'left-arm', label: 'В левую руку', chance: '65%' },
+    { id: 'left-leg', label: 'В левую ногу', chance: '60%' },
+  ];
+  const rightTargets = parseTargetList(panelConfig.RightTargets, defaultRightTargets);
+  const rightList = document.createElement('div');
+  rightList.className = 'character-overlay__targets character-overlay__targets--right';
+  rightTargets.forEach(target => {
+    rightList.appendChild(createCharacterTargetButton(target));
+  });
+  display.appendChild(rightList);
+
+  frame.appendChild(display);
+  overlay.appendChild(frame);
+
+  const consolePanel = document.createElement('div');
+  consolePanel.className = 'character-overlay__console';
+
+  const primaryText = panelConfig.ConsolePrimary ?? 'Выберите часть тела для точечного удара.';
+  if (primaryText) {
+    const primaryLine = document.createElement('div');
+    primaryLine.className = 'character-overlay__console-line character-overlay__console-line--primary';
+    primaryLine.textContent = primaryText;
+    consolePanel.appendChild(primaryLine);
+  }
+
+  const secondaryText =
+    panelConfig.ConsoleSecondary ??
+    'Шанс попадания зависит от навыков, расстояния и состояния оружия.';
+  if (secondaryText) {
+    const secondaryLine = document.createElement('div');
+    secondaryLine.className = 'character-overlay__console-line';
+    secondaryLine.textContent = secondaryText;
+    consolePanel.appendChild(secondaryLine);
+  }
+
+  const defaultStats = [
+    { label: 'ОД', value: '4' },
+    { label: 'Шанс', value: '—' },
+    { label: 'Оружие', value: 'Прототип' },
+  ];
+  const stats = parseKeyValuePairs(panelConfig.ConsoleStats, defaultStats);
+  if (stats.length > 0) {
+    const statsList = document.createElement('dl');
+    statsList.className = 'character-overlay__stats';
+    stats.forEach(({ label, value }) => {
+      const term = document.createElement('dt');
+      term.className = 'character-overlay__stat-label';
+      term.textContent = label;
+      statsList.appendChild(term);
+
+      const data = document.createElement('dd');
+      data.className = 'character-overlay__stat-value';
+      data.textContent = value;
+      statsList.appendChild(data);
+    });
+    consolePanel.appendChild(statsList);
+  }
+
+  const footerText = panelConfig.ConsoleFooter ?? '';
+  if (footerText) {
+    const footer = document.createElement('div');
+    footer.className = 'character-overlay__console-footer';
+    footer.textContent = footerText;
+    consolePanel.appendChild(footer);
+  }
+
+  overlay.appendChild(consolePanel);
+  section.appendChild(overlay);
+
+  return true;
+}
+
+const overlayCustomBuilders = new Map([
+  ['character', buildCharacterOverlay],
+]);
+
+function appendGenericOverlayContent(section, panelConfig = {}) {
+  if (panelConfig.Description) {
+    const description = document.createElement('p');
+    description.className = 'overlay__description';
+    description.textContent = panelConfig.Description;
+    section.appendChild(description);
+  }
+
+  const notes = parseList(panelConfig.Notes);
+  if (notes.length > 0) {
+    const list = document.createElement('ul');
+    list.className = 'overlay__notes';
+    notes.forEach(note => {
+      const item = document.createElement('li');
+      item.textContent = note;
+      list.appendChild(item);
+    });
+    section.appendChild(list);
+  }
+
+  if (panelConfig.Footer) {
+    const footer = document.createElement('footer');
+    footer.className = 'panel__footer';
+    footer.textContent = panelConfig.Footer;
+    section.appendChild(footer);
+  }
 }
 
 function registerActions(config) {
@@ -292,30 +522,10 @@ function createOverlayElement(panelName, panelConfig = {}) {
   header.textContent = title;
   section.appendChild(header);
 
-  if (panelConfig.Description) {
-    const description = document.createElement('p');
-    description.className = 'overlay__description';
-    description.textContent = panelConfig.Description;
-    section.appendChild(description);
-  }
-
-  const notes = parseList(panelConfig.Notes);
-  if (notes.length > 0) {
-    const list = document.createElement('ul');
-    list.className = 'overlay__notes';
-    notes.forEach(note => {
-      const item = document.createElement('li');
-      item.textContent = note;
-      list.appendChild(item);
-    });
-    section.appendChild(list);
-  }
-
-  if (panelConfig.Footer) {
-    const footer = document.createElement('footer');
-    footer.className = 'panel__footer';
-    footer.textContent = panelConfig.Footer;
-    section.appendChild(footer);
+  const builder = overlayCustomBuilders.get(panelName);
+  const handled = builder ? builder(section, panelConfig) === true : false;
+  if (!handled) {
+    appendGenericOverlayContent(section, panelConfig);
   }
 
   const closeLabel = panelConfig.CloseLabel ?? 'Закрыть';
@@ -968,6 +1178,21 @@ if (overlayLayerEl) {
   overlayLayerEl.addEventListener('click', event => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const bodyButton = target.closest('[data-role="body-target"]');
+    if (bodyButton) {
+      event.preventDefault();
+      const label = bodyButton.dataset.label ?? bodyButton.textContent?.trim() ?? 'цель';
+      const chance = bodyButton.dataset.chance ?? '';
+      overlayLayerEl
+        .querySelectorAll('[data-role="body-target"]')
+        .forEach(btn => {
+          btn.classList.toggle('character-target--active', btn === bodyButton);
+        });
+      const descriptor = chance ? `${label} (${chance})` : label;
+      addSystemMessage(`Выбрана цель: ${descriptor}.`);
       return;
     }
 
