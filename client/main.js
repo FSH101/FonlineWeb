@@ -5,13 +5,20 @@ const HEX_SIZE = 24;
 const SQRT3 = Math.sqrt(3);
 
 const DIRECTION_VECTORS = {
+  southEast: { q: 0, r: 1 },
   east: { q: 1, r: 0 },
   northEast: { q: 1, r: -1 },
   northWest: { q: 0, r: -1 },
   west: { q: -1, r: 0 },
   southWest: { q: -1, r: 1 },
-  southEast: { q: 0, r: 1 },
 };
+
+const DIRECTION_METADATA = Object.entries(DIRECTION_VECTORS).map(([name, vector]) => {
+  const px = SQRT3 * (vector.q + vector.r / 2);
+  const py = 1.5 * vector.r;
+  const angle = Math.atan2(py, px);
+  return { name, angle };
+});
 
 const connectionStatusEl = document.getElementById('connectionStatus');
 const chatLogEl = document.getElementById('chatLog');
@@ -1358,6 +1365,11 @@ function pickHexFromEvent(event) {
   return candidate;
 }
 
+function angleDifference(a, b) {
+  const diff = a - b;
+  return Math.atan2(Math.sin(diff), Math.cos(diff));
+}
+
 function axialDeltaToDirection(from, to) {
   const dq = to.q - from.q;
   const dr = to.r - from.r;
@@ -1365,15 +1377,24 @@ function axialDeltaToDirection(from, to) {
     return null;
   }
 
+  const px = SQRT3 * (dq + dr / 2);
+  const py = 1.5 * dr;
+  if (px === 0 && py === 0) {
+    return null;
+  }
+
+  const directionAngle = Math.atan2(py, px);
+
   let bestDirection = null;
-  let bestScore = -Infinity;
-  for (const [direction, vector] of Object.entries(DIRECTION_VECTORS)) {
-    const score = dq * vector.q + dr * vector.r;
-    if (score > bestScore) {
-      bestScore = score;
-      bestDirection = direction;
+  let smallestDelta = Infinity;
+  for (const { name, angle } of DIRECTION_METADATA) {
+    const delta = Math.abs(angleDifference(directionAngle, angle));
+    if (delta < smallestDelta) {
+      smallestDelta = delta;
+      bestDirection = name;
     }
   }
+
   return bestDirection;
 }
 
