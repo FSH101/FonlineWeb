@@ -2,7 +2,7 @@ services:
   - type: web
     name: fonlineweb
     env: docker
-    dockerfilePath: server/Dockerfile
+    dockerfilePath: Dockerfile
     plan: free
     autoDeploy: true
     envVars:
