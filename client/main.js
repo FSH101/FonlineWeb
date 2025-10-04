@@ -794,6 +794,7 @@ function ensurePlayerVisual(player, center) {
       currentPosition: { ...basePosition },
       startPosition: { ...basePosition },
       targetPosition: { ...basePosition },
+      finalPosition: { ...basePosition },
       moveStartTime: performance.now(),
       moveDuration: playerSettings.moveDuration,
       moving: false,
@@ -801,10 +802,53 @@ function ensurePlayerVisual(player, center) {
       frameTimer: 0,
       currentAnimation: 'idle',
       facingDirection: playerSettings.defaultFacing,
+      pendingWaypoints: [],
+      currentTargetAxial: null,
+      motionAxial: { ...player.position.axial },
     };
     playerVisuals.set(player.id, visual);
   }
+  if (!visual.finalPosition) {
+    visual.finalPosition = { ...visual.targetPosition };
+  }
+  if (!Array.isArray(visual.pendingWaypoints)) {
+    visual.pendingWaypoints = [];
+  }
+  if (!visual.motionAxial) {
+    visual.motionAxial = { ...player.position.axial };
+  }
+  if (!('currentTargetAxial' in visual)) {
+    visual.currentTargetAxial = null;
+  }
   return visual;
+}
+
+function advanceVisualWaypoint(visual, timestamp) {
+  if (!Array.isArray(visual.pendingWaypoints) || visual.pendingWaypoints.length === 0) {
+    visual.moving = false;
+    visual.currentTargetAxial = null;
+    visual.startPosition = { ...visual.finalPosition };
+    visual.targetPosition = { ...visual.finalPosition };
+    visual.currentPosition = { ...visual.finalPosition };
+    visual.moveStartTime = timestamp;
+    visual.motionAxial = { ...visual.axial };
+    return false;
+  }
+
+  const next = visual.pendingWaypoints.shift();
+  visual.currentTargetAxial = { ...next.axial };
+  visual.startPosition = { ...visual.currentPosition };
+  visual.targetPosition = { ...next.position };
+  visual.moveStartTime = timestamp;
+  visual.moveDuration = playerSettings.moveDuration;
+  visual.moving = true;
+
+  const direction = axialDeltaToDirection(visual.motionAxial, next.axial);
+  if (direction) {
+    visual.facingDirection = direction;
+  }
+
+  return true;
 }
 
 function updateVisualForPlayer(player, previous = null) {
@@ -815,24 +859,16 @@ function updateVisualForPlayer(player, previous = null) {
 
   const visual = ensurePlayerVisual(player, center);
   visual.axial = { ...player.position.axial };
-  visual.targetPosition = { x: center.x, y: center.y };
+  visual.finalPosition = { x: center.x, y: center.y };
 
   const now = performance.now();
 
-  let direction = visual.facingDirection;
-  if (previous) {
-    const computedDirection = axialDeltaToDirection(previous.position.axial, player.position.axial);
-    if (computedDirection) {
-      direction = computedDirection;
-    }
-  }
-  if (direction) {
-    visual.facingDirection = direction;
-  }
-
   if (!previous) {
-    visual.startPosition = { ...visual.targetPosition };
-    visual.currentPosition = { ...visual.targetPosition };
+    visual.pendingWaypoints = [];
+    visual.motionAxial = { ...player.position.axial };
+    visual.startPosition = { ...visual.finalPosition };
+    visual.currentPosition = { ...visual.finalPosition };
+    visual.targetPosition = { ...visual.finalPosition };
     visual.moving = false;
     visual.moveDuration = playerSettings.moveDuration;
     setVisualAnimation(visual, 'idle');
@@ -851,23 +887,64 @@ function updateVisualForPlayer(player, previous = null) {
       ? { x: prevCenter.x, y: prevCenter.y }
       : { ...visual.currentPosition };
 
-    visual.startPosition = startPosition;
+    const axialPath = computeHexLine(previous.position.axial, player.position.axial);
+    const waypoints = [];
+    for (const axial of axialPath) {
+      const waypointCenter = getTileCenter(axial);
+      if (!waypointCenter) {
+        continue;
+      }
+      waypoints.push({
+        axial,
+        position: { x: waypointCenter.x, y: waypointCenter.y },
+      });
+    }
+
+    if (waypoints.length === 0) {
+      visual.pendingWaypoints = [];
+      visual.motionAxial = { ...player.position.axial };
+      visual.startPosition = startPosition;
+      visual.currentPosition = { ...startPosition };
+      visual.targetPosition = { ...visual.finalPosition };
+      visual.currentTargetAxial = null;
+      visual.moveStartTime = now;
+      const steps = Math.max(
+        axialDistance(previous.position.axial, player.position.axial),
+        1
+      );
+      visual.moveDuration = playerSettings.moveDuration * steps;
+      visual.moving = true;
+      const fallbackDirection = axialDeltaToDirection(
+        previous.position.axial,
+        player.position.axial
+      );
+      if (fallbackDirection) {
+        visual.facingDirection = fallbackDirection;
+      }
+      setVisualAnimation(visual, 'run');
+      return;
+    }
+
+    visual.pendingWaypoints = waypoints;
+    visual.motionAxial = { ...previous.position.axial };
     visual.currentPosition = { ...startPosition };
-    visual.moveStartTime = now;
-    const steps = Math.max(
-      axialDistance(previous.position.axial, player.position.axial),
-      1
-    );
-    visual.moveDuration = playerSettings.moveDuration * steps;
-    visual.moving = true;
-    setVisualAnimation(visual, 'run');
-  } else {
-    visual.startPosition = { ...visual.targetPosition };
-    visual.currentPosition = { ...visual.targetPosition };
-    visual.moving = false;
-    visual.moveDuration = playerSettings.moveDuration;
-    setVisualAnimation(visual, 'idle');
+    visual.startPosition = { ...startPosition };
+    visual.currentTargetAxial = null;
+    visual.targetPosition = { ...visual.currentPosition };
+    const started = advanceVisualWaypoint(visual, now);
+    setVisualAnimation(visual, started ? 'run' : 'idle');
+    return;
   }
+
+  visual.pendingWaypoints = [];
+  visual.motionAxial = { ...player.position.axial };
+  visual.startPosition = { ...visual.finalPosition };
+  visual.currentPosition = { ...visual.finalPosition };
+  visual.targetPosition = { ...visual.finalPosition };
+  visual.currentTargetAxial = null;
+  visual.moving = false;
+  visual.moveDuration = playerSettings.moveDuration;
+  setVisualAnimation(visual, 'idle');
 }
 
 function synchronizeVisualsWithWorld() {
@@ -1044,15 +1121,35 @@ function updateAnimationStates(delta, timestamp) {
       const duration = Math.max(visual.moveDuration, 1);
       const elapsed = timestamp - visual.moveStartTime;
       const t = Math.min(elapsed / duration, 1);
-      const nextX = visual.startPosition.x + (visual.targetPosition.x - visual.startPosition.x) * t;
-      const nextY = visual.startPosition.y + (visual.targetPosition.y - visual.startPosition.y) * t;
+      const nextX =
+        visual.startPosition.x + (visual.targetPosition.x - visual.startPosition.x) * t;
+      const nextY =
+        visual.startPosition.y + (visual.targetPosition.y - visual.startPosition.y) * t;
       visual.currentPosition = { x: nextX, y: nextY };
       if (t >= 1) {
         visual.moving = false;
         visual.currentPosition = { ...visual.targetPosition };
+        if (visual.currentTargetAxial) {
+          visual.motionAxial = { ...visual.currentTargetAxial };
+          visual.currentTargetAxial = null;
+        }
+        const started = advanceVisualWaypoint(visual, timestamp);
+        if (!started) {
+          visual.currentPosition = { ...visual.finalPosition };
+        }
+      }
+    } else if (
+      Array.isArray(visual.pendingWaypoints) &&
+      visual.pendingWaypoints.length > 0 &&
+      !visual.currentTargetAxial
+    ) {
+      const started = advanceVisualWaypoint(visual, timestamp);
+      if (!started) {
+        visual.currentPosition = { ...visual.finalPosition };
       }
     } else {
-      visual.currentPosition = { ...visual.targetPosition };
+      visual.currentPosition = { ...visual.finalPosition };
+      visual.targetPosition = { ...visual.finalPosition };
     }
 
     const desiredAnimation = visual.moving ? 'run' : 'idle';
@@ -1354,6 +1451,61 @@ function axialDistance(a, b) {
   const dr = a.r - b.r;
   const ds = -dq - dr;
   return Math.round((Math.abs(dq) + Math.abs(dr) + Math.abs(ds)) / 2);
+}
+
+function axialToCube(axial) {
+  return { x: axial.q, y: -axial.q - axial.r, z: axial.r };
+}
+
+function cubeToAxial(cube) {
+  return { q: cube.x, r: cube.z };
+}
+
+function cubeLerp(a, b, t) {
+  return {
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+    z: a.z + (b.z - a.z) * t,
+  };
+}
+
+function cubeRound(cube) {
+  let rx = Math.round(cube.x);
+  let ry = Math.round(cube.y);
+  let rz = Math.round(cube.z);
+
+  const xDiff = Math.abs(rx - cube.x);
+  const yDiff = Math.abs(ry - cube.y);
+  const zDiff = Math.abs(rz - cube.z);
+
+  if (xDiff > yDiff && xDiff > zDiff) {
+    rx = -ry - rz;
+  } else if (yDiff > zDiff) {
+    ry = -rx - rz;
+  } else {
+    rz = -rx - ry;
+  }
+
+  return { x: rx, y: ry, z: rz };
+}
+
+function computeHexLine(from, to) {
+  const distance = axialDistance(from, to);
+  if (distance === 0) {
+    return [];
+  }
+
+  const fromCube = axialToCube(from);
+  const toCube = axialToCube(to);
+  const line = [];
+
+  for (let step = 1; step <= distance; step += 1) {
+    const t = step / distance;
+    const interpolated = cubeLerp(fromCube, toCube, t);
+    line.push(cubeToAxial(cubeRound(interpolated)));
+  }
+
+  return line;
 }
 
 function pickHexFromEvent(event) {
