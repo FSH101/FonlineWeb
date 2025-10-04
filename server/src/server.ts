@@ -94,8 +94,23 @@ export class GameServer {
   }
 
   async start() {
-    await checkDatabaseConnection();
-    logger.info('Подключение к базе данных успешно установлено');
+    try {
+      await checkDatabaseConnection();
+      if (config.databaseUrl) {
+        logger.info('Подключение к базе данных успешно установлено');
+      } else {
+        logger.info('Сервер запущен в режиме без внешней базы данных');
+      }
+    } catch (error) {
+      const description = error instanceof Error ? error.message : String(error);
+      logger.error(`Не удалось установить подключение к базе данных: ${description}`, error);
+
+      if (config.requireDatabase) {
+        throw error;
+      }
+
+      logger.warn('Режим работы без базы данных активирован (REQUIRE_DATABASE=false)');
+    }
 
     await this.scriptManager.loadAll();
 
