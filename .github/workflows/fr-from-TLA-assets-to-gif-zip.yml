@@ -1,4 +1,4 @@
-name: External FR (TLA assets_1/art) → GIF (embedded JASC palette) → ZIP → Release
+name: External FR → GIF (with embedded JASC palette) → ZIP → Release
 
 on:
   workflow_dispatch: {}
@@ -23,6 +23,8 @@ jobs:
           sparse-checkout: |
             assets_1/art
           sparse-checkout-cone: true
+          # Если внезапно станет приватным — добавь secret EXTERNAL_REPO_TOKEN и раскомментируй:
+          # token: ${{ secrets.EXTERNAL_REPO_TOKEN }}
 
       - name: Install deps
         run: |
@@ -33,6 +35,7 @@ jobs:
       - name: Write embedded JASC palette
         shell: bash
         run: |
+          set -e
           mkdir -p assets/palette
           cat > assets/palette/fallout.jasc.pal << 'PAL'
           JASC-PAL
@@ -296,29 +299,33 @@ jobs:
           255 255 255
           PAL
 
-      - name: Write converter (P-mode with fixed palette)
+      - name: Write converter (P-mode with fixed palette, mirror tree)
         shell: bash
         run: |
+          set -e
           cat > fr_to_gif.py << 'PY'
           #!/usr/bin/env python3
-          import struct, sys, json
+          import struct, sys
           from pathlib import Path
           from PIL import Image
 
-          # --- Load JASC palette ---
+          # --- load JASC palette ---
           def load_jasc_pal(path: Path):
               lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
               if len(lines) < 4 or not lines[0].strip().upper().startswith("JASC-PAL"):
                   raise ValueError("Not a JASC-PAL")
-              count = int(lines[2].strip())
+              try:
+                  count = int(lines[2].strip())
+              except:
+                  count = 256
               cols=[]
               for s in lines[3:3+count]:
                   p=s.split()
                   if len(p)<3: continue
-                  r,g,b = map(lambda x: max(0,min(255,int(x))), p[:3])
+                  r,g,b = [max(0,min(255,int(x))) for x in p[:3]]
                   cols.append((r,g,b))
               if len(cols)<256: cols += [(i,i,i) for i in range(len(cols),256)]
-              cols[0]=(0,0,0)  # index 0 = transparent
+              cols[0]=(0,0,0)
               return cols[:256]
 
           PALETTE = load_jasc_pal(Path("assets/palette/fallout.jasc.pal"))
@@ -335,9 +342,7 @@ jobs:
           def be_u32(b,o): return struct.unpack_from(">I",b,o)[0]
 
           def parse_fr_bytes(data: bytes):
-              version=be_u32(data,0x00)
               fps=be_u16(data,0x04)
-              action=be_u16(data,0x06)
               fpd=be_u16(data,0x08)
               dirOff=[be_u32(data,0x22+i*4) for i in range(6)]
               base=0x3E
@@ -349,7 +354,7 @@ jobs:
                   for _ in range(fpd):
                       if cur+12>len(data): break
                       w=be_u16(data,cur); h=be_u16(data,cur+2); sz=be_u32(data,cur+4)
-                      xo=be_s16(data,cur+8); yo=be_s16(data,cur+10)
+                      xo=be_s16(data,cur+8); yo=be_s16(data,cur+10)  # anchors not used in this pass
                       if cur+12+sz>len(data): break
                       raw=data[cur+12:cur+12+sz]
                       if len(raw)<w*h: raw = raw + bytes(w*h-len(raw))
@@ -359,14 +364,13 @@ jobs:
                   dirs.append(frames)
               return {"fps":fps,"fpd":fpd,"directions":dirs}
 
+          DIR_LABELS = ["S","SW","W","NW","NE","E"]
+
           def frame_to_P(fr):
               w,h = fr["w"], fr["h"]
-              raw = bytes(fr["idx"])
-              im = Image.frombytes("P",(w,h), raw)
+              im = Image.frombytes("P",(w,h), bytes(fr["idx"]))
               im.putpalette(FLAT)
               return im
-
-          DIR_LABELS = ["S","SW","W","NW","NE","E"]
 
           def compose_seq(framesP):
               mw = max(im.width for im in framesP)
@@ -375,7 +379,6 @@ jobs:
               for fr in framesP:
                   canvas = Image.new("P",(mw,mh), 0)  # 0 = transparent
                   canvas.putpalette(FLAT)
-                  # mask: все индексы != 0 считаем непрозрачными
                   mask = fr.convert("L").point(lambda v: 255 if v!=0 else 0)
                   canvas.paste(fr, ((mw-fr.width)//2, mh-fr.height), mask)
                   seq.append(canvas)
@@ -389,73 +392,50 @@ jobs:
                   seq[0].save(out_path, save_all=True, append_images=seq[1:], transparency=0,
                               optimize=False, disposal=2, duration=dur, loop=0)
 
-          def classify(p: Path):
-              s=str(p).lower()
-              if any(t in s for t in ["crit","critter","people","human","npc","mut","dog","rat","gec","ant"]):
-                  return "critter","generic"
-              if any(t in s for t in ["tile","floor"]):
-                  return "tile","floor"
-              if any(t in s for t in ["item","inv","icon"]):
-                  return "item","item"
-              if any(t in s for t in ["wall","door","gate","tree","scen","decor","object"]):
-                  return "object","decor"
-              return "unknown","unknown"
-
           def main():
-              src = Path("ext_repo/assets_1/art")
-              out = Path("build/gif"); out.mkdir(parents=True, exist_ok=True)
-              exts = tuple([".fr"+str(i) for i in range(6)]) + (".frm",".FRM",".FR0",".FR1",".FR2",".FR3",".FR4",".FR5")
-              files = sorted([p for p in src.rglob("*") if p.suffix in exts], key=lambda p:p.as_posix())
-              asset_map=[]
+              SRC_ROOT = Path("ext_repo/assets_1/art")
+              OUT_ROOT = Path("build/gif"); OUT_ROOT.mkdir(parents=True, exist_ok=True)
+              exts = (".frm",".fr0",".fr1",".fr2",".fr3",".fr4",".fr5",".FRM",".FR0",".FR1",".FR2",".FR3",".FR4",".FR5")
+              files = sorted([p for p in SRC_ROOT.rglob("*") if p.suffix in exts], key=lambda p:p.as_posix())
+              print(f"Found {len(files)} FR* files")
               for i,p in enumerate(files,1):
                   try:
                       parsed = parse_fr_bytes(p.read_bytes())
                   except Exception as e:
-                      print(f"[{i}/{len(files)}] {p.name} parse ERROR: {e}", file=sys.stderr)
+                      print(f"[{i}/{len(files)}] {p} — parse ERROR: {e}", file=sys.stderr)
                       continue
-
-                  kind, cat = classify(p)
-                  base = (out / kind / cat / p.stem); base.mkdir(parents=True, exist_ok=True)
-                  for d_idx, frames in enumerate(parsed["directions"]):
+                  rel_dir = p.parent.relative_to(SRC_ROOT)
+                  out_dir = (OUT_ROOT / rel_dir); out_dir.mkdir(parents=True, exist_ok=True)
+                  base = p.stem
+                  for d_idx, frames in enumerate(parsed['directions']):
                       if not frames: continue
-                      label = ["dir_"+lab if kind=="critter" else f"dir_{d_idx}"][0] if kind=="critter" else f"dir_{d_idx}"
-                      if kind=="critter":
-                          lab = DIR_LABELS[d_idx] if d_idx<len(DIR_LABELS) else f"DIR{d_idx}"
-                          label = f"dir_{lab}"
-                      ddir = base / label; ddir.mkdir(parents=True, exist_ok=True)
-
+                      label = DIR_LABELS[d_idx] if d_idx < len(DIR_LABELS) else f"DIR{d_idx}"
+                      out_path = out_dir / f"{base}__{label}.gif"
                       framesP = [frame_to_P(fr) for fr in frames]
                       seq = compose_seq(framesP)
-                      save_gif(seq, ddir/"anim.gif", parsed["fps"])
+                      save_gif(seq, out_path, parsed['fps'])
+                  print(f"[{i}/{len(files)}] {p} -> {out_dir}")
+              print("✅ Done. Output:", OUT_ROOT)
 
-                  asset_map.append({
-                      "in": str(p.relative_to(src).as_posix()),
-                      "out": str(base.relative_to(out).as_posix()),
-                      "kind": kind, "category": cat,
-                      "dirs": sum(1 for d in parsed["directions"] if d),
-                      "framesPerDir": parsed["fpd"],
-                      "fps": parsed["fps"],
-                  })
-                  print(f"[{i}/{len(files)}] {p.name} -> {base.relative_to(out).as_posix()}")
-
-              (out/"asset_map.json").write_text(json.dumps(asset_map, ensure_ascii=False, indent=2))
-              print("✅ Done:", out)
-
-          if __name__=="__main__":
+          if __name__ == "__main__":
               main()
           PY
           chmod +x fr_to_gif.py
 
-      - name: Convert FR → GIF (fixed palette)
+      - name: Convert FR → GIF (fixed palette, mirror tree)
         run: |
+          set -e
           mkdir -p build/gif
           python fr_to_gif.py
+          echo "Preview of output tree:"
+          find build/gif -type f | head -n 50
 
       - name: Pack ZIP
         run: |
+          set -e
           cd build
-          zip -r "fr_gifs_pack.zip" gif
-          ls -lah fr_gifs_pack.zip gif/asset_map.json
+          zip -rq "fr_gifs_pack.zip" gif
+          ls -lah fr_gifs_pack.zip
 
       - name: Create/Upload Release
         env:
@@ -463,14 +443,11 @@ jobs:
         run: |
           set -e
           TAG="fr-gifs-$(date +%Y%m%d-%H%M%S)"
-          gh release create "$TAG" -t "$TAG" -n "FR → GIF (fixed palette) from TLA assets_1/art" || true
+          gh release create "$TAG" -t "$TAG" -n "FR → GIF (fixed palette, mirrored tree) from TLA assets_1/art" || true
           gh release upload "$TAG" "build/fr_gifs_pack.zip" --clobber
-          gh release upload "$TAG" "build/gif/asset_map.json" --clobber
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: fr_gifs_pack
-          path: |
-            build/fr_gifs_pack.zip
-            build/gif/asset_map.json
+          path: build/fr_gifs_pack.zip
