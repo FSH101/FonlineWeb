@@ -11,13 +11,7 @@ function resolveExtension(path) {
   return `.${match[1].toLowerCase()}`;
 }
 
-async function loadImageFrame(url) {
-  const response = await fetch(url, { cache: 'no-store' });
-  if (!response.ok) {
-    throw new Error(`Не удалось загрузить кадр: ${url} (${response.status})`);
-  }
-  const blob = await response.blob();
-
+async function decodeImageBlob(blob) {
   if (typeof createImageBitmap === 'function') {
     const bitmap = await createImageBitmap(blob);
     return {
@@ -38,12 +32,21 @@ async function loadImageFrame(url) {
         height: image.naturalHeight || image.height || 0,
       });
     };
-    image.onerror = event => {
+    image.onerror = () => {
       URL.revokeObjectURL(objectUrl);
-      reject(new Error(`Не удалось декодировать кадр: ${url}`));
+      reject(new Error('Не удалось декодировать изображение.'));
     };
     image.src = objectUrl;
   });
+}
+
+async function loadImageFrame(url) {
+  const response = await fetch(url, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Не удалось загрузить кадр: ${url} (${response.status})`);
+  }
+  const blob = await response.blob();
+  return decodeImageBlob(blob);
 }
 
 function joinUrl(base, path) {
@@ -75,13 +78,21 @@ function normalizeBaseUrl(url) {
   return trimmed.replace(/\/+$/, '');
 }
 
-async function loadFrameFromBases(baseUrls, directory, frameName) {
+async function fetchResourceFromBases(baseUrls, directory, resourceName, responseType = 'blob') {
   let lastError = null;
   for (const base of baseUrls) {
     const directoryBase = joinUrl(base, directory ?? '');
-    const frameUrl = joinUrl(directoryBase, frameName);
+    const resourceUrl = joinUrl(directoryBase, resourceName);
     try {
-      return await loadImageFrame(frameUrl);
+      const response = await fetch(resourceUrl, { cache: 'no-store' });
+      if (!response.ok) {
+        lastError = new Error(`Не удалось загрузить ресурс: ${resourceUrl} (${response.status})`);
+        continue;
+      }
+      const data = responseType === 'arrayBuffer'
+        ? await response.arrayBuffer()
+        : await response.blob();
+      return { data, url: resourceUrl };
     } catch (error) {
       lastError = error;
     }
@@ -91,7 +102,116 @@ async function loadFrameFromBases(baseUrls, directory, frameName) {
     throw lastError;
   }
 
-  throw new Error(`Не удалось загрузить кадр ${frameName}`);
+  throw new Error(`Не удалось загрузить ресурс ${resourceName}`);
+}
+
+async function decodeGifBuffer(buffer) {
+  if (typeof ImageDecoder !== 'function') {
+    return null;
+  }
+
+  try {
+    const dataView = buffer instanceof ArrayBuffer ? buffer : buffer.buffer;
+    const decoder = new ImageDecoder({ data: dataView, type: 'image/gif' });
+    const track = decoder.tracks && decoder.tracks.length > 0 ? decoder.tracks[0] : null;
+    const frameCount = track?.frameCount ?? 0;
+
+    const frames = [];
+    let totalDuration = 0;
+    let countedFrames = 0;
+
+    if (frameCount && Number.isFinite(frameCount)) {
+      for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
+        const { image } = await decoder.decode({ frameIndex, completeFramesOnly: true });
+        if (!image) {
+          continue;
+        }
+        const width = image.displayWidth ?? image.width ?? 0;
+        const height = image.displayHeight ?? image.height ?? 0;
+        let durationMs = null;
+        if (typeof image.duration === 'number' && image.duration > 0) {
+          durationMs = image.duration / 1000;
+          totalDuration += durationMs;
+          countedFrames += 1;
+        }
+        frames.push({
+          width,
+          height,
+          bitmap: image,
+          anchorX: width / 2,
+          anchorY: height,
+          durationMs,
+        });
+      }
+    }
+
+    if (frames.length === 0) {
+      const { image } = await decoder.decode({ completeFramesOnly: true });
+      if (image) {
+        const width = image.displayWidth ?? image.width ?? 0;
+        const height = image.displayHeight ?? image.height ?? 0;
+        const durationMs = typeof image.duration === 'number' && image.duration > 0
+          ? image.duration / 1000
+          : null;
+        if (durationMs) {
+          totalDuration += durationMs;
+          countedFrames += 1;
+        }
+        frames.push({
+          width,
+          height,
+          bitmap: image,
+          anchorX: width / 2,
+          anchorY: height,
+          durationMs,
+        });
+      }
+    }
+
+    if (frames.length === 0) {
+      return null;
+    }
+
+    const averageDuration = countedFrames > 0 ? totalDuration / countedFrames : null;
+
+    return {
+      frames,
+      frameDurationMs: averageDuration,
+    };
+  } catch (error) {
+    console.warn('[player] Не удалось декодировать GIF через ImageDecoder', error);
+    return null;
+  }
+}
+
+async function loadGifFramesFromBases(baseUrls, directory, gifName) {
+  const { data } = await fetchResourceFromBases(baseUrls, directory, gifName, 'arrayBuffer');
+  const buffer = data instanceof ArrayBuffer ? data : data.buffer;
+  const decoded = await decodeGifBuffer(buffer);
+  if (decoded) {
+    return decoded;
+  }
+
+  const blob = new Blob([buffer], { type: 'image/gif' });
+  const { bitmap, width, height } = await decodeImageBlob(blob);
+  return {
+    frames: [
+      {
+        width,
+        height,
+        bitmap,
+        anchorX: width / 2,
+        anchorY: height,
+        durationMs: null,
+      },
+    ],
+    frameDurationMs: null,
+  };
+}
+
+async function loadFrameFromBases(baseUrls, directory, frameName) {
+  const { data: blob } = await fetchResourceFromBases(baseUrls, directory, frameName, 'blob');
+  return decodeImageBlob(blob);
 }
 
 async function loadImageSequenceAnimation(basePath, options = {}) {
@@ -121,7 +241,9 @@ async function loadImageSequenceAnimation(basePath, options = {}) {
     baseCandidates.push(manifest.baseUrl);
   }
 
-  baseCandidates.push(normalizedBase);
+  if (manifest.includeBasePath !== false) {
+    baseCandidates.push(normalizedBase);
+  }
 
   const uniqueBaseCandidates = [];
   const seenBases = new Set();
@@ -158,6 +280,7 @@ async function loadImageSequenceAnimation(basePath, options = {}) {
     : Array.from({ length: entryMap.size }, (_, index) => `dir_${index}`);
 
   const directions = [];
+  const perDirectionDurations = [];
 
   for (let index = 0; index < effectiveOrder.length; index += 1) {
     const directionKey = effectiveOrder[index];
@@ -169,26 +292,104 @@ async function loadImageSequenceAnimation(basePath, options = {}) {
     }
 
     const directory = entry.directory ?? directionKey;
-    const frameNames = Array.isArray(entry.frames) ? entry.frames : [];
+    const frameSpecs = Array.isArray(entry.frames) ? entry.frames : [];
+    const frames = [];
 
-    const frames = await Promise.all(
-      frameNames.map(async frameName => {
+    for (const frameSpec of frameSpecs) {
+      if (typeof frameSpec === 'string') {
         const { bitmap, width, height } = await loadFrameFromBases(
           uniqueBaseCandidates,
           directory,
-          frameName,
+          frameSpec,
         );
         const anchorX = entry.anchorX ?? manifest.anchorX ?? width / 2;
         const anchorY = entry.anchorY ?? manifest.anchorY ?? height;
-        return {
+        frames.push({
           width,
           height,
           bitmap,
           anchorX,
           anchorY,
-        };
-      })
-    );
+          durationMs: null,
+        });
+        continue;
+      }
+
+      if (!frameSpec || typeof frameSpec !== 'object') {
+        continue;
+      }
+
+      const resourceName = frameSpec.name || frameSpec.file || frameSpec.src || frameSpec.path;
+      const isGif =
+        frameSpec.type === 'gif'
+        || (typeof resourceName === 'string' && /\.gif$/i.test(resourceName));
+
+      if (isGif && typeof resourceName === 'string') {
+        const gifResult = await loadGifFramesFromBases(
+          uniqueBaseCandidates,
+          directory,
+          resourceName,
+        );
+
+        if (gifResult?.frameDurationMs && gifResult.frameDurationMs > 0) {
+          perDirectionDurations.push(gifResult.frameDurationMs);
+        }
+
+        if (Array.isArray(gifResult?.frames)) {
+          for (const gifFrame of gifResult.frames) {
+            if (!gifFrame) {
+              continue;
+            }
+            const width = gifFrame.width ?? 0;
+            const height = gifFrame.height ?? 0;
+            const anchorX =
+              frameSpec.anchorX
+              ?? entry.anchorX
+              ?? manifest.anchorX
+              ?? gifFrame.anchorX
+              ?? width / 2;
+            const anchorY =
+              frameSpec.anchorY
+              ?? entry.anchorY
+              ?? manifest.anchorY
+              ?? gifFrame.anchorY
+              ?? height;
+            frames.push({
+              width,
+              height,
+              bitmap: gifFrame.bitmap,
+              anchorX,
+              anchorY,
+              durationMs:
+                typeof gifFrame.durationMs === 'number' && gifFrame.durationMs > 0
+                  ? gifFrame.durationMs
+                  : null,
+            });
+          }
+        }
+        continue;
+      }
+
+      if (typeof resourceName === 'string') {
+        const { bitmap, width, height } = await loadFrameFromBases(
+          uniqueBaseCandidates,
+          directory,
+          resourceName,
+        );
+        const anchorX =
+          frameSpec.anchorX ?? entry.anchorX ?? manifest.anchorX ?? width / 2;
+        const anchorY =
+          frameSpec.anchorY ?? entry.anchorY ?? manifest.anchorY ?? height;
+        frames.push({
+          width,
+          height,
+          bitmap,
+          anchorX,
+          anchorY,
+          durationMs: null,
+        });
+      }
+    }
 
     directions.push({
       id: directionKey,
@@ -198,13 +399,31 @@ async function loadImageSequenceAnimation(basePath, options = {}) {
     });
   }
 
-  const framesPerSecond = manifest.framesPerSecond ?? options.framesPerSecond ?? 10;
-  const frameDurationMs = manifest.frameDurationMs ?? (framesPerSecond > 0 ? 1000 / framesPerSecond : 100);
+  const candidateFps =
+    typeof manifest.framesPerSecond === 'number' && manifest.framesPerSecond > 0
+      ? manifest.framesPerSecond
+      : typeof options.framesPerSecond === 'number' && options.framesPerSecond > 0
+        ? options.framesPerSecond
+        : null;
+
+  const defaultFrameDuration =
+    typeof manifest.frameDurationMs === 'number' && manifest.frameDurationMs > 0
+      ? manifest.frameDurationMs
+      : candidateFps
+        ? 1000 / candidateFps
+        : null;
+
+  const averagedGifDuration = perDirectionDurations.length > 0
+    ? perDirectionDurations.reduce((sum, value) => sum + value, 0) / perDirectionDurations.length
+    : null;
+
+  const frameDurationMs = defaultFrameDuration ?? averagedGifDuration ?? null;
+  const framesPerSecond = candidateFps ?? (frameDurationMs ? 1000 / frameDurationMs : null);
 
   return {
     type: 'image-sequence',
     framesPerSecond,
-    frameDurationMs,
+    frameDurationMs: frameDurationMs ?? 0,
     directions,
     directionOrder: effectiveOrder,
   };

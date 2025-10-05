@@ -1436,15 +1436,39 @@ function updateAnimationStates(delta, timestamp) {
         ? playerAnimations.run ?? playerAnimations.idle
         : playerAnimations.idle ?? playerAnimations.run;
 
-    if (animation && animation.frameDurationMs > 0) {
-      const frames = getAnimationFrames(animation, visual.facingDirection);
-      if (frames.length > 0) {
-        const frameDuration = animation.frameDurationMs;
+    const frames = animation ? getAnimationFrames(animation, visual.facingDirection) : [];
+    if (frames.length > 0) {
+      const fallbackDuration = animation && animation.frameDurationMs > 0
+        ? animation.frameDurationMs
+        : null;
+      const frameDurations = frames.map(frame =>
+        typeof frame?.durationMs === 'number' && frame.durationMs > 0 ? frame.durationMs : null,
+      );
+      const hasExplicitDurations = frameDurations.some(duration => duration !== null);
+
+      if (hasExplicitDurations || fallbackDuration) {
+        const safeFallback = fallbackDuration && fallbackDuration > 0 ? fallbackDuration : 100;
+        const normalizedDurations = frameDurations.map(duration => duration ?? safeFallback);
+
+        let currentIndex = frames.length > 0
+          ? ((visual.frameIndex % frames.length) + frames.length) % frames.length
+          : 0;
         visual.frameTimer += delta;
-        while (visual.frameTimer >= frameDuration) {
-          visual.frameTimer -= frameDuration;
-          visual.frameIndex = (visual.frameIndex + 1) % frames.length;
+
+        let guard = 0;
+        while (
+          normalizedDurations.length > 0
+          && currentIndex < normalizedDurations.length
+          && normalizedDurations[currentIndex] > 0
+          && visual.frameTimer >= normalizedDurations[currentIndex]
+          && guard < 1000
+        ) {
+          visual.frameTimer -= normalizedDurations[currentIndex];
+          currentIndex = (currentIndex + 1) % normalizedDurations.length;
+          guard += 1;
         }
+
+        visual.frameIndex = currentIndex;
       } else {
         visual.frameIndex = 0;
         visual.frameTimer = 0;
