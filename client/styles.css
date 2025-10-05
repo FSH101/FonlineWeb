@@ -26,6 +26,18 @@
   color: var(--text-primary);
 }
 
+body.is-mobile {
+  --hud-gap: clamp(8px, 2vw, 16px);
+  --ui-bottom-gap: clamp(10px, 3vw, 18px);
+  --ui-command-width: min(60vw, 260px);
+  --ui-command-button-gap: 8px;
+  --ui-command-button-height: 44px;
+  --ui-chat-width: min(96vw, 440px);
+  --ui-chat-max-height: clamp(180px, 45vh, 280px);
+  --ui-chat-input-height: 44px;
+  --panel-radius: 10px;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -63,7 +75,8 @@ canvas {
   inset: 0;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-end;
+  gap: var(--hud-gap);
   padding: var(--hud-gap);
   z-index: 2;
 }
@@ -86,6 +99,11 @@ canvas {
   color: var(--accent);
 }
 
+body.is-mobile .panel__title {
+  font-size: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
 .panel__footer {
   margin-top: 1rem;
   font-size: 0.75rem;
@@ -93,49 +111,38 @@ canvas {
   letter-spacing: 0.05em;
 }
 
-.hud-top {
-  display: flex;
+.hud-status {
+  pointer-events: auto;
+  align-self: flex-end;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1.5rem;
-  padding: 1.25rem clamp(1rem, 3vw, 2rem);
-}
-
-.hud-top__title {
-  font-size: clamp(1.05rem, 2.5vw, 1.35rem);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-
-.hud-top__status {
-  display: flex;
-  align-items: center;
-  gap: clamp(0.75rem, 2vw, 1.5rem);
-}
-
-.status-block {
-  display: grid;
-  gap: 0.25rem;
-  font-size: 0.8rem;
-  text-transform: uppercase;
+  gap: 0.65rem;
+  padding: 0.65rem 0.9rem;
+  font-size: 0.75rem;
   letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
-.status-label {
+.hud-status__label {
   color: var(--text-secondary);
 }
 
-.status-value {
+.hud-status__value {
   font-family: 'Roboto Mono', 'Fira Code', monospace;
   font-size: 0.95rem;
+  color: var(--accent);
+  transition: color 160ms ease;
 }
 
-.status-value[data-variant='ok'] {
+.hud-status__value[data-variant='default'] {
+  color: var(--text-secondary);
+}
+
+.hud-status__value[data-variant='ok'] {
   color: var(--accent);
 }
 
-.status-value[data-variant='error'] {
+.hud-status__value[data-variant='error'] {
   color: var(--danger);
 }
 
@@ -568,11 +575,31 @@ canvas {
   align-items: stretch;
 }
 
+body.is-mobile .hud-status {
+  align-self: stretch;
+  justify-content: space-between;
+  font-size: 0.7rem;
+}
+
+body.is-mobile .hud-status__value {
+  font-size: 0.85rem;
+}
+
+body.is-mobile .hud-bottom {
+  grid-template-columns: 1fr;
+  gap: clamp(10px, 3vw, 18px);
+}
+
 .chat {
   display: flex;
   flex-direction: column;
   padding: 1rem;
   max-width: var(--ui-chat-width);
+}
+
+body.is-mobile .chat {
+  padding: 0.75rem;
+  max-width: 100%;
 }
 
 .chat__log {
@@ -587,6 +614,11 @@ canvas {
   border-radius: 8px;
   display: grid;
   gap: 0.35rem;
+}
+
+body.is-mobile .chat__log {
+  padding: 0.45rem;
+  font-size: 0.78rem;
 }
 
 .chat__log::-webkit-scrollbar {
@@ -624,6 +656,11 @@ canvas {
   gap: 0.5rem;
 }
 
+body.is-mobile .chat__form {
+  grid-template-columns: 1fr;
+  gap: 0.45rem;
+}
+
 .chat__form input {
   padding: 0.6rem 0.75rem;
   border-radius: 8px;
@@ -632,6 +669,10 @@ canvas {
   color: var(--text-primary);
   font-size: 0.9rem;
   min-height: var(--ui-chat-input-height);
+}
+
+body.is-mobile .chat__form input {
+  font-size: 0.85rem;
 }
 
 .chat__form input:focus {
@@ -651,6 +692,11 @@ canvas {
   min-height: var(--ui-chat-input-height);
 }
 
+body.is-mobile .chat__form button {
+  padding: 0.45rem 0.85rem;
+  font-size: 0.8rem;
+}
+
 .chat__form button:hover,
 .chat__form button:focus {
   background: rgba(192, 255, 86, 0.25);
@@ -668,6 +714,22 @@ canvas {
   display: grid;
   grid-template-columns: 1fr;
   gap: var(--ui-command-button-gap);
+}
+
+body.is-mobile .command-bar {
+  max-width: none;
+  padding: 0.75rem 0.85rem 0.9rem;
+}
+
+body.is-mobile .command-bar__grid {
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+}
+
+body.is-mobile .command-bar button {
+  font-size: 0.72rem;
+  padding: 0.45rem 0.6rem;
+  min-height: var(--ui-command-button-height);
+  border-radius: 9px;
 }
 
 .command-bar button {
@@ -701,29 +763,16 @@ canvas {
   }
 }
 
-@media (max-width: 860px) {
-  .hud {
-    padding: 12px;
-    gap: 12px;
-  }
+  @media (max-width: 860px) {
+    .hud {
+      padding: 12px;
+      gap: 12px;
+    }
+    .hud-bottom {
+      grid-template-columns: 1fr;
+    }
 
-  .hud-top {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
-  }
-
-  .hud-top__status {
-    width: 100%;
-    justify-content: space-between;
-    flex-wrap: wrap;
-  }
-
-  .hud-bottom {
-    grid-template-columns: 1fr;
-  }
-
-  .command-bar__grid {
+    .command-bar__grid {
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   }
 }
@@ -737,11 +786,13 @@ canvas {
     max-height: 140px;
   }
 
-  .status-block {
-    font-size: 0.75rem;
+  .hud-status {
+    font-size: 0.68rem;
+    padding: 0.55rem 0.75rem;
+    gap: 0.5rem;
   }
 
-  .status-value {
-    font-size: 0.85rem;
+  .hud-status__value {
+    font-size: 0.82rem;
   }
 }

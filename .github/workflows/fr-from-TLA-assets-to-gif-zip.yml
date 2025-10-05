@@ -1,0 +1,97 @@
+name: External FR → GIF (with embedded JASC palette) → ZIP → Release
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout THIS repo (FonlineWeb)
+        uses: actions/checkout@v4
+
+      - name: Checkout EXTERNAL repo (FSH101/TLA3.0TG) — sparse assets_1/art
+        uses: actions/checkout@v4
+        with:
+          repository: FSH101/TLA3.0TG
+          ref: codex/continue-work-on-project-per-tasks.md
+          path: ext_repo
+          fetch-depth: 1
+          sparse-checkout: |
+            assets_1/art
+          sparse-checkout-cone: true
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pillow
+          sudo apt-get update && sudo apt-get install -y zip
+
+      - name: Write embedded JASC palette
+        shell: bash
+        run: |
+          set -e
+          mkdir -p assets/palette
+          cat > assets/palette/fallout.jasc.pal << 'PAL'
+          JASC-PAL
+          0100
+          256
+          0 0 255
+          236 236 236
+          220 220 220
+          204 204 204
+          188 188 188
+          176 176 176
+          160 160 160
+          144 144 144
+          128 128 128
+          116 116 116
+          100 100 100
+          84 84 84
+          72 72 72
+          56 56 56
+          40 40 40
+          32 32 32
+          252 236 236
+          236 216 216
+          220 196 196
+          208 176 176
+          192 160 160
+          176 144 144
+          164 128 128
+          148 112 112
+          132 96 96
+          120 84 84
+          104 68 68
+          88 56 56
+          76 44 44
+          60 36 36
+          44 24 24
+          32 16 16
+          236 236 252
+          216 216 236
+          196 196 220
+          176 176 208
+          160 160 192
+          144 144 176
+          128 128 164
+          112 112 148
+          96 96 132
+          84 84 120
+          68 68 104
+          56 56 88
+          44 44 76
+          36 36 60
+          24 24 44
+          16 16 32
+          252 176 240
+          196 96 168
+          104 36 96
+          76 20 72
+          56 12 52
+          40 16 36
+          36 4 36
+          28 12 24

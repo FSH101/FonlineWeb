@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fonline Web — Каноническое поле</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #111;
+        color: #f4f1e0;
+        font-family: 'Segoe UI', Roboto, sans-serif;
+      }
+      canvas {
+        width: 100vw;
+        height: 100vh;
+        display: block;
+        background: #111;
+      }
+      .hint {
+        position: fixed;
+        left: 16px;
+        bottom: 16px;
+        padding: 12px 16px;
+        background: rgba(17, 17, 17, 0.82);
+        border: 1px solid rgba(244, 241, 224, 0.2);
+        border-radius: 8px;
+        font-size: 0.85rem;
+        line-height: 1.4;
+        max-width: 320px;
+      }
+      .hint strong {
+        color: #8fda4f;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="grid" aria-label="Каноническая алмазная сетка с гексами"></canvas>
+    <div class="hint">
+      Тап по гексу переключает контур <strong>зелёный↔красный</strong>. Сетка построена по канону 2:1.
+    </div>
+    <script type="module" src="./CanonGrid.js"></script>
+  </body>
+</html>

@@ -1,22 +1,64 @@
 import { loadUiConfig } from './ui/configLoader.js';
 import { tryLoadAnimation } from './player/heroSprite.js';
+import { loadMapDefinition, createTileTextureCache } from './map/mapData.js';
+import {
+  HEX_W,
+  HALF_HEX_W,
+  THREE_QUARTER_HEX_H,
+  AXIAL_Q_VECTOR,
+  AXIAL_R_VECTOR,
+  tileQuad as canonicalTileQuad,
+  hexPolygonPoints as canonicalHexPolygonPoints,
+  axialToPixel as canonicalAxialToPixel,
+  pixelToAxial as canonicalPixelToAxial,
+  uniqueHexEdges as canonicalUniqueHexEdges,
+  fillPolygon as canonicalFillPolygon,
+  strokePolygon as canonicalStrokePolygon,
+  tracePolygon as canonicalTracePolygon,
+} from './map/CanonGrid.js';
 
-const HEX_SIZE = 24;
-const SQRT3 = Math.sqrt(3);
+const TILE_W = HEX_W;
+const HEX_HALF_WIDTH = HALF_HEX_W;
+const HEX_THREE_QUARTER_HEIGHT = THREE_QUARTER_HEX_H;
+
+const mapView = {
+  zoom: 1,
+  minZoom: 0.85,
+  maxZoom: 2.4,
+  step: 0.12,
+};
+
+const MAP_DEFINITION_URL = './assets/maps/canonical-demo.json';
+
+const tileTextureCache = createTileTextureCache();
+
+const mapState = {
+  definition: null,
+  tiles: [],
+  tileIndex: new Map(),
+};
+
+const DOUBLE_TAP_DELAY_MS = 280;
+const TAP_MOVEMENT_THRESHOLD_PX = 22;
+const SWIPE_MIN_DISTANCE_PX = 36;
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
 
 const DIRECTION_VECTORS = {
-  southEast: { q: 0, r: 1 },
-  east: { q: 1, r: 0 },
-  northEast: { q: 1, r: -1 },
-  northWest: { q: 0, r: -1 },
-  west: { q: -1, r: 0 },
-  southWest: { q: -1, r: 1 },
+  southEast: { q: 1, r: 0 },
+  east: { q: 1, r: -1 },
+  northEast: { q: 0, r: -1 },
+  northWest: { q: -1, r: 0 },
+  west: { q: -1, r: 1 },
+  southWest: { q: 0, r: 1 },
 };
 
 const DIRECTION_METADATA = Object.entries(DIRECTION_VECTORS).map(([name, vector]) => {
-  const px = SQRT3 * (vector.q + vector.r / 2);
-  const py = 1.5 * vector.r;
-  const angle = Math.atan2(py, px);
+  const dx = vector.q * AXIAL_Q_VECTOR.x + vector.r * AXIAL_R_VECTOR.x;
+  const dy = vector.q * AXIAL_Q_VECTOR.y + vector.r * AXIAL_R_VECTOR.y;
+  const angle = Math.atan2(dy, dx);
   return { name, angle };
 });
 
@@ -32,6 +74,26 @@ const commandBarTitleEl = commandBarEl?.querySelector('.panel__title') ?? null;
 const hudTitleEl = document.querySelector('.hud-top__title');
 const chatTitleEl = document.querySelector('.chat .panel__title');
 const overlayLayerEl = document.getElementById('overlayLayer');
+
+const coarsePointerMedia = window.matchMedia('(hover: none) and (pointer: coarse)');
+
+function isMobileLikeInput() {
+  return coarsePointerMedia.matches || navigator.maxTouchPoints > 0;
+}
+
+function updateInputModeClass() {
+  if (!document.body) {
+    return;
+  }
+  document.body.classList.toggle('is-mobile', isMobileLikeInput());
+}
+
+updateInputModeClass();
+if (typeof coarsePointerMedia.addEventListener === 'function') {
+  coarsePointerMedia.addEventListener('change', updateInputModeClass);
+} else if (typeof coarsePointerMedia.addListener === 'function') {
+  coarsePointerMedia.addListener(updateInputModeClass);
+}
 
 let overlayPanels = new Map();
 let activeOverlay = null;
@@ -73,7 +135,7 @@ const fallbackUiConfig = {
     MoveDuration: '280',
     Scale: '2',
     OffsetX: '0',
-    OffsetY: '-28',
+    OffsetY: '0',
     DefaultFacing: 'southEast',
   },
   Action: {
@@ -160,9 +222,11 @@ const DEFAULT_PLAYER_SETTINGS = {
   moveDuration: 280,
   scale: 2,
   offsetX: 0,
-  offsetY: -28,
+  offsetY: 0,
   defaultFacing: 'southEast',
 };
+
+const LEGACY_PLAYER_OFFSET_Y = -28;
 
 const playerSettings = { ...DEFAULT_PLAYER_SETTINGS };
 
@@ -263,7 +327,11 @@ function applyPlayerSettings(config) {
   playerSettings.moveDuration = parseNumber(config.MoveDuration, DEFAULT_PLAYER_SETTINGS.moveDuration);
   playerSettings.scale = parseNumber(config.Scale, DEFAULT_PLAYER_SETTINGS.scale);
   playerSettings.offsetX = parseNumber(config.OffsetX, DEFAULT_PLAYER_SETTINGS.offsetX);
-  playerSettings.offsetY = parseNumber(config.OffsetY, DEFAULT_PLAYER_SETTINGS.offsetY);
+  const configuredOffsetY = parseNumber(config.OffsetY, DEFAULT_PLAYER_SETTINGS.offsetY);
+  playerSettings.offsetY =
+    configuredOffsetY === LEGACY_PLAYER_OFFSET_Y
+      ? DEFAULT_PLAYER_SETTINGS.offsetY
+      : configuredOffsetY;
 
   const defaultFacing = config.DefaultFacing?.trim();
   playerSettings.defaultFacing =
@@ -750,6 +818,52 @@ async function initializeUi() {
 const canvas = document.getElementById('hexCanvas');
 const ctx = canvas.getContext('2d');
 
+const canvasMetrics = {
+  width: Math.max(1, Math.round(canvas?.clientWidth ?? 1)),
+  height: Math.max(1, Math.round(canvas?.clientHeight ?? 1)),
+  dpr: 1,
+};
+
+function resizeCanvas() {
+  if (!canvas || !ctx) {
+    return;
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  const cssWidth = Math.max(1, Math.round(rect.width));
+  const cssHeight = Math.max(1, Math.round(rect.height));
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const physicalWidth = Math.max(1, Math.round(cssWidth * dpr));
+  const physicalHeight = Math.max(1, Math.round(cssHeight * dpr));
+
+  if (canvas.width !== physicalWidth || canvas.height !== physicalHeight) {
+    canvas.width = physicalWidth;
+    canvas.height = physicalHeight;
+  }
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+
+  canvasMetrics.width = cssWidth;
+  canvasMetrics.height = cssHeight;
+  canvasMetrics.dpr = dpr;
+
+  updateLayoutScreenPositions();
+}
+
+function prepareCanvasFrame() {
+  if (!canvas || !ctx) {
+    return;
+  }
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+  ctx.setTransform(canvasMetrics.dpr, 0, 0, canvasMetrics.dpr, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+}
+
 const worldState = {
   grid: null,
   players: new Map(),
@@ -759,11 +873,24 @@ const worldState = {
 const layout = {
   tileCenters: new Map(),
   orderedTiles: [],
+  origin: { x: 0, y: 0 },
   offsetX: 0,
   offsetY: 0,
+  rawTiles: [],
+  bounds: null,
+  floorTiles: [],
+  floorTileCenters: new Map(),
 };
 
+resizeCanvas();
+
 let socket;
+let hoveredHex = null;
+
+let activeTouchGesture = null;
+let pendingTapTimeoutId = null;
+let pendingTapHex = null;
+let lastTapInfo = { time: 0, x: 0, y: 0 };
 
 function getTileCenter(axial) {
   if (!axial) {
@@ -959,80 +1086,229 @@ function axialKey(q, r) {
 }
 
 function axialToPixelRaw(q, r) {
+  return canonicalAxialToPixel(q, r, { x: 0, y: 0 });
+}
+
+function hexPolygonPoints(centerX, centerY) {
+  return canonicalHexPolygonPoints(centerX, centerY);
+}
+
+function traceHexPath(centerX, centerY) {
+  const points = hexPolygonPoints(centerX, centerY);
+  canonicalTracePolygon(ctx, points);
+}
+
+function drawHighlight(centerX, centerY, color, lineWidth = Math.max(2, Math.round(TILE_W * 0.09))) {
+  ctx.save();
+  ctx.beginPath();
+  traceHexPath(centerX, centerY);
+  ctx.lineWidth = lineWidth;
+  ctx.strokeStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = Math.max(Math.round(TILE_W * 0.3), 8);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function getHexOrigin() {
+  if (layout.origin) {
+    return { x: Math.round(layout.origin.x), y: Math.round(layout.origin.y) };
+  }
   return {
-    x: HEX_SIZE * SQRT3 * (q + r / 2),
-    y: HEX_SIZE * 1.5 * r,
+    x: Math.round(canvasMetrics.width / 2),
+    y: Math.round(canvasMetrics.height / 2),
   };
 }
 
-function hexPath(centerX, centerY, size) {
-  ctx.beginPath();
-  for (let i = 0; i < 6; i += 1) {
-    const angle = ((60 * i - 30) * Math.PI) / 180;
-    const x = centerX + size * Math.cos(angle);
-    const y = centerY + size * Math.sin(angle);
-    if (i === 0) {
-      ctx.moveTo(x, y);
-    } else {
-      ctx.lineTo(x, y);
+function polygonBounds(points) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  for (const point of points) {
+    if (!point) {
+      continue;
     }
+    const x = Math.round(point.x);
+    const y = Math.round(point.y);
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
   }
-  ctx.closePath();
+
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) {
+    return { minX: 0, maxX: 0, minY: 0, maxY: 0, width: 0, height: 0 };
+  }
+
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+
+  return { minX, maxX, minY, maxY, width, height };
 }
 
-function drawHexTile(centerX, centerY, variant = 0) {
-  const basePalette = ['#2a2417', '#322a1c', '#3b311f'];
-  const overlayPalette = ['#4b4126', '#5a4b2a', '#463c26'];
-  const detailPalette = ['#756036', '#7f6a3a', '#6d5731'];
-  const idx = Math.abs(variant) % basePalette.length;
-
+function drawMapBackground() {
+  const origin = getHexOrigin();
   ctx.save();
+  ctx.fillStyle = '#111111';
+  ctx.fillRect(0, 0, canvasMetrics.width, canvasMetrics.height);
 
-  hexPath(centerX, centerY, HEX_SIZE);
-  ctx.fillStyle = basePalette[idx];
-  ctx.fill();
+  layout.floorTiles = [];
+  layout.floorTileCenters.clear();
 
-  ctx.lineWidth = Math.max(HEX_SIZE * 0.12, 1.5);
-  ctx.strokeStyle = '#1a1208';
-  ctx.stroke();
+  const tiles = Array.isArray(mapState.tiles) ? mapState.tiles : [];
 
-  hexPath(centerX, centerY, HEX_SIZE * 0.82);
-  ctx.fillStyle = overlayPalette[idx];
-  ctx.fill();
+  if (tiles.length > 0) {
+    ctx.lineWidth = 1;
+    ctx.lineJoin = 'miter';
+    ctx.lineCap = 'butt';
 
-  const insetWidth = HEX_SIZE * 0.9;
-  const insetHeight = HEX_SIZE * 0.4;
-  ctx.fillStyle = detailPalette[idx];
-  ctx.globalAlpha = 0.45;
-  ctx.fillRect(
-    centerX - insetWidth / 2,
-    centerY - insetHeight / 2,
-    insetWidth,
-    insetHeight
+    for (const tile of tiles) {
+      const quad = canonicalTileQuad(origin, tile.x, tile.y);
+      const bounds = polygonBounds(quad);
+      const centerX = Math.round((quad[0].x + quad[2].x) / 2);
+      const centerY = Math.round((quad[0].y + quad[2].y) / 2);
+
+      const floorEntry = {
+        id: tile.id,
+        x: tile.x,
+        y: tile.y,
+        quad,
+        centerX,
+        centerY,
+        bounds,
+        texture: tile.texture,
+        textureId: tile.textureId,
+      };
+
+      layout.floorTiles.push(floorEntry);
+      layout.floorTileCenters.set(tile.id, {
+        x: centerX,
+        y: centerY,
+        quad,
+        tile: floorEntry,
+      });
+
+      const textureRecord = tile.textureId ? tileTextureCache.get(tile.textureId) : null;
+
+      if (textureRecord && textureRecord.image) {
+        ctx.save();
+        ctx.beginPath();
+        canonicalTracePolygon(ctx, quad);
+        ctx.clip();
+        const drawWidth = Math.max(1, bounds.width);
+        const drawHeight = Math.max(1, bounds.height);
+        ctx.drawImage(textureRecord.image, bounds.minX, bounds.minY, drawWidth, drawHeight);
+        ctx.restore();
+      } else {
+        ctx.fillStyle = '#1f1f1f';
+        canonicalFillPolygon(ctx, quad);
+      }
+
+      ctx.strokeStyle = '#000000';
+      canonicalStrokePolygon(ctx, quad);
+    }
+
+    ctx.restore();
+    return;
+  }
+
+  ctx.strokeStyle = '#000000';
+  ctx.fillStyle = '#ffffff';
+  ctx.lineWidth = 1;
+  ctx.lineJoin = 'miter';
+  ctx.lineCap = 'butt';
+
+  const zoom = Math.max(mapView.zoom, 0.001);
+  const tileRadius = Math.max(
+    20,
+    Math.ceil(((canvasMetrics.width + canvasMetrics.height) / TILE_W) / zoom) + 4
   );
+
+  for (let tileRow = -tileRadius; tileRow <= tileRadius; tileRow += 1) {
+    for (let tileCol = -tileRadius; tileCol <= tileRadius; tileCol += 1) {
+      const quad = canonicalTileQuad(origin, tileCol, tileRow);
+      canonicalFillPolygon(ctx, quad);
+      canonicalStrokePolygon(ctx, quad);
+    }
+  }
 
   ctx.restore();
 }
 
-function drawHighlight(centerX, centerY, color, lineWidth = HEX_SIZE * 0.18) {
+function setMapDefinition(definition) {
+  mapState.definition = definition ?? { tiles: [] };
+  const tiles = Array.isArray(definition?.tiles) ? definition.tiles : [];
+  mapState.tiles = tiles.map(tile => ({
+    id: tile.id,
+    type: tile.type,
+    x: tile.x,
+    y: tile.y,
+    texture: tile.texture,
+    textureId: tile.textureId,
+  }));
+  mapState.tileIndex.clear();
+
+  for (const tile of mapState.tiles) {
+    mapState.tileIndex.set(tile.id, tile);
+    if (tile.textureId) {
+      tileTextureCache
+        .load(tile.textureId)
+        .then(record => {
+          if (record) {
+            renderWorld();
+          }
+        })
+        .catch(error => {
+          console.warn(`Не удалось загрузить текстуру плитки ${tile.textureId}`, error);
+        });
+    }
+  }
+}
+
+async function loadInitialMap() {
+  try {
+    const definition = await loadMapDefinition(MAP_DEFINITION_URL);
+    setMapDefinition(definition);
+  } catch (error) {
+    console.warn('Не удалось загрузить карту, используется пустая подложка', error);
+    mapState.definition = { tiles: [] };
+    mapState.tiles = [];
+    mapState.tileIndex.clear();
+  }
+}
+
+function drawHexOverlay() {
+  if (!layout.orderedTiles.length) {
+    return;
+  }
+
   ctx.save();
-  hexPath(centerX, centerY, HEX_SIZE * 0.94);
-  ctx.lineWidth = lineWidth;
-  ctx.strokeStyle = color;
-  ctx.shadowColor = color;
-  ctx.shadowBlur = Math.max(HEX_SIZE * 0.35, 8);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgb(54, 163, 67)';
+  ctx.beginPath();
+  const centers = layout.orderedTiles.map(({ centerX, centerY }) => ({
+    center: { x: centerX, y: centerY },
+  }));
+  const edges = canonicalUniqueHexEdges(centers);
+  edges.forEach(({ a, b }) => {
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+  });
   ctx.stroke();
   ctx.restore();
 }
 
 function drawPlayerFallback(centerX, centerY, isSelf) {
-  const radius = HEX_SIZE * 0.35;
+  const base = Math.min(HEX_HALF_WIDTH, HEX_THREE_QUARTER_HEIGHT);
+  const radius = Math.max(6, Math.round(base * 0.45));
   ctx.save();
   ctx.beginPath();
   ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
   ctx.fillStyle = isSelf ? '#c0ff56' : '#64a9ff';
   ctx.fill();
-  ctx.lineWidth = Math.max(HEX_SIZE * 0.1, 2);
+  ctx.lineWidth = Math.max(2, Math.round(radius * 0.35));
   ctx.strokeStyle = '#0d1208';
   ctx.stroke();
   ctx.restore();
@@ -1096,13 +1372,13 @@ function drawPlayerVisual(visual, isSelf) {
   }
 
   const scale = playerSettings.scale || 1;
-  const drawWidth = frame.width * scale;
-  const drawHeight = frame.height * scale;
-  const anchorX = (frame.anchorX ?? frame.width / 2) * scale;
-  const anchorY = (frame.anchorY ?? frame.height) * scale;
+  const drawWidth = Math.round(frame.width * scale);
+  const drawHeight = Math.round(frame.height * scale);
+  const anchorX = Math.round((frame.anchorX ?? frame.width / 2) * scale);
+  const anchorY = Math.round((frame.anchorY ?? frame.height) * scale);
 
-  const drawX = visual.currentPosition.x - anchorX + playerSettings.offsetX;
-  const drawY = visual.currentPosition.y - anchorY + playerSettings.offsetY;
+  const drawX = Math.round(visual.currentPosition.x - anchorX + playerSettings.offsetX);
+  const drawY = Math.round(visual.currentPosition.y - anchorY + playerSettings.offsetY);
 
   ctx.save();
   ctx.imageSmoothingEnabled = false;
@@ -1199,26 +1475,72 @@ function startGameLoop() {
 }
 
 function computeLayout(grid) {
-  const rawPositions = grid.tiles.map(tile => ({
-    tile,
-    ...axialToPixelRaw(tile.q, tile.r),
-  }));
-  const minX = Math.min(...rawPositions.map(p => p.x));
-  const maxX = Math.max(...rawPositions.map(p => p.x));
-  const minY = Math.min(...rawPositions.map(p => p.y));
-  const maxY = Math.max(...rawPositions.map(p => p.y));
-  const padding = HEX_SIZE * 2.5;
+  if (!grid || !Array.isArray(grid.tiles)) {
+    layout.rawTiles = [];
+    layout.bounds = null;
+    updateLayoutScreenPositions();
+    return;
+  }
 
-  canvas.width = Math.ceil(maxX - minX + padding * 2);
-  canvas.height = Math.ceil(maxY - minY + padding * 2);
+  const rawTiles = grid.tiles.map(tile => {
+    const { x, y } = axialToPixelRaw(tile.q, tile.r);
+    return { tile, rawX: x, rawY: y };
+  });
 
-  const offsetX = padding - minX;
-  const offsetY = padding - minY;
+  layout.rawTiles = rawTiles;
+
+  if (rawTiles.length === 0) {
+    layout.bounds = null;
+    updateLayoutScreenPositions();
+    return;
+  }
+
+  const xs = rawTiles.map(item => item.rawX);
+  const ys = rawTiles.map(item => item.rawY);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+
+  layout.bounds = { minX, maxX, minY, maxY };
+  updateLayoutScreenPositions();
+}
+
+function updateLayoutScreenPositions() {
+  const width = canvasMetrics.width;
+  const height = canvasMetrics.height;
+
+  if (!layout.rawTiles || layout.rawTiles.length === 0) {
+    layout.tileCenters.clear();
+    layout.orderedTiles = [];
+    const originX = Math.round(width / 2);
+    const originY = Math.round(height / 2);
+    layout.origin = { x: originX, y: originY };
+    layout.offsetX = originX;
+    layout.offsetY = originY;
+    return;
+  }
+
+  const bounds = layout.bounds;
+  const minX = bounds?.minX ?? Math.min(...layout.rawTiles.map(item => item.rawX));
+  const maxX = bounds?.maxX ?? Math.max(...layout.rawTiles.map(item => item.rawX));
+  const minY = bounds?.minY ?? Math.min(...layout.rawTiles.map(item => item.rawY));
+  const maxY = bounds?.maxY ?? Math.max(...layout.rawTiles.map(item => item.rawY));
+
+  const rawCenterX = Math.round((minX + maxX) / 2);
+  const rawCenterY = Math.round((minY + maxY) / 2);
+
+  const originX = Math.round(width / 2) - rawCenterX;
+  const originY = Math.round(height / 2) - rawCenterY;
+
+  layout.origin = { x: originX, y: originY };
+  layout.offsetX = originX;
+  layout.offsetY = originY;
 
   layout.tileCenters.clear();
-  layout.orderedTiles = rawPositions.map(({ tile, x, y }) => {
-    const centerX = x + offsetX;
-    const centerY = y + offsetY;
+  layout.orderedTiles = layout.rawTiles.map(({ tile, rawX, rawY }) => {
+    const centerX = Math.round(originX + rawX);
+    const centerY = Math.round(originY + rawY);
     layout.tileCenters.set(axialKey(tile.q, tile.r), {
       x: centerX,
       y: centerY,
@@ -1226,23 +1548,35 @@ function computeLayout(grid) {
     });
     return { tile, centerX, centerY };
   });
-
-  layout.offsetX = offsetX;
-  layout.offsetY = offsetY;
 }
 
 function renderWorld() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  if (!layout.orderedTiles.length) {
+  if (!ctx || !canvas) {
     return;
   }
 
-  ctx.fillStyle = '#010101';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  prepareCanvasFrame();
 
-  for (const { tile, centerX, centerY } of layout.orderedTiles) {
-    drawHexTile(centerX, centerY, tile.q - tile.r);
+  ctx.fillStyle = '#111111';
+  ctx.fillRect(0, 0, canvasMetrics.width, canvasMetrics.height);
+
+  ctx.save();
+  applyMapViewTransform();
+
+  drawMapBackground();
+  drawHexOverlay();
+
+  if (!layout.orderedTiles.length) {
+    ctx.restore();
+    return;
+  }
+
+  if (hoveredHex) {
+    const hoveredKey = axialKey(hoveredHex.q, hoveredHex.r);
+    const hoveredCenter = layout.tileCenters.get(hoveredKey);
+    if (hoveredCenter) {
+      drawHighlight(hoveredCenter.x, hoveredCenter.y, '#ffd86b', Math.max(2, Math.round(TILE_W * 0.08)));
+    }
   }
 
   const self = getSelfPlayer();
@@ -1265,6 +1599,32 @@ function renderWorld() {
       drawPlayerFallback(center.x, center.y, playerId === worldState.selfId);
     }
   }
+
+  ctx.restore();
+}
+
+function applyMapViewTransform() {
+  const centerX = canvasMetrics.width / 2;
+  const centerY = canvasMetrics.height / 2;
+  ctx.translate(centerX, centerY);
+  ctx.scale(mapView.zoom, mapView.zoom);
+  ctx.translate(-centerX, -centerY);
+}
+
+function setMapZoom(nextZoom) {
+  const clamped = clamp(nextZoom, mapView.minZoom, mapView.maxZoom);
+  if (Math.abs(clamped - mapView.zoom) < 0.001) {
+    return;
+  }
+  mapView.zoom = clamped;
+  renderWorld();
+}
+
+function adjustMapZoom(direction) {
+  if (!direction) {
+    return;
+  }
+  setMapZoom(mapView.zoom + direction * mapView.step);
 }
 
 function setConnectionStatus(text, variant = 'default') {
@@ -1403,22 +1763,25 @@ function getSelfPlayer() {
     : null;
 }
 
-function pointerToCanvas(event) {
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
+function viewToWorld(x, y) {
+  const centerX = canvasMetrics.width / 2;
+  const centerY = canvasMetrics.height / 2;
   return {
-    x: (event.clientX - rect.left) * scaleX,
-    y: (event.clientY - rect.top) * scaleY,
+    x: (x - centerX) / mapView.zoom + centerX,
+    y: (y - centerY) / mapView.zoom + centerY,
   };
 }
 
-function pixelToAxial(x, y) {
-  const localX = x - layout.offsetX;
-  const localY = y - layout.offsetY;
+function pointerToCanvas(event) {
+  const rect = canvas.getBoundingClientRect();
+  const cssX = event.clientX - rect.left;
+  const cssY = event.clientY - rect.top;
+  return viewToWorld(cssX, cssY);
+}
 
-  const q = ((SQRT3 / 3) * localX - (1 / 3) * localY) / HEX_SIZE;
-  const r = ((2 / 3) * localY) / HEX_SIZE;
+function pixelToAxial(x, y) {
+  const origin = getHexOrigin();
+  const { q, r } = canonicalPixelToAxial(x, y, origin);
   return hexRound(q, r);
 }
 
@@ -1508,13 +1871,97 @@ function computeHexLine(from, to) {
   return line;
 }
 
-function pickHexFromEvent(event) {
-  const { x, y } = pointerToCanvas(event);
+function pickHexFromPoint(x, y) {
   const candidate = pixelToAxial(x, y);
   if (!layout.tileCenters.has(axialKey(candidate.q, candidate.r))) {
     return null;
   }
   return candidate;
+}
+
+function pickHexFromEvent(event) {
+  const { x, y } = pointerToCanvas(event);
+  return pickHexFromPoint(x, y);
+}
+
+function setHoveredHex(hex) {
+  const currentKey = hoveredHex ? axialKey(hoveredHex.q, hoveredHex.r) : null;
+  const nextKey = hex ? axialKey(hex.q, hex.r) : null;
+  if (currentKey === nextKey) {
+    return;
+  }
+  hoveredHex = hex;
+  renderWorld();
+}
+
+function requestPlayerMove(hex, { mode = 'run', silentIfSame = false } = {}) {
+  if (!hex) {
+    return;
+  }
+
+  const self = getSelfPlayer();
+  if (!self) {
+    addSystemMessage('Ожидание соединения с сервером...');
+    return;
+  }
+
+  if (self.position.axial.q === hex.q && self.position.axial.r === hex.r) {
+    if (!silentIfSame) {
+      addSystemMessage('Вы уже на выбранном гексе');
+    }
+    return;
+  }
+
+  sendMoveTo(hex, { mode });
+}
+
+function clearTouchGesture(pointerId) {
+  if (
+    activeTouchGesture &&
+    typeof canvas.releasePointerCapture === 'function'
+  ) {
+    const targetId = pointerId ?? activeTouchGesture.pointerId;
+    try {
+      canvas.releasePointerCapture(targetId);
+    } catch (error) {
+      // ignore errors when pointer is not captured
+    }
+  }
+  activeTouchGesture = null;
+}
+
+function clearPendingTap() {
+  if (pendingTapTimeoutId !== null) {
+    window.clearTimeout(pendingTapTimeoutId);
+    pendingTapTimeoutId = null;
+  }
+  pendingTapHex = null;
+}
+
+function processTouchTap(event, hex) {
+  const now = performance.now();
+  const { time, x, y } = lastTapInfo;
+  const clientX = event.clientX;
+  const clientY = event.clientY;
+  const elapsed = now - time;
+  const travel = Math.hypot(clientX - x, clientY - y);
+
+  if (elapsed <= DOUBLE_TAP_DELAY_MS && travel <= TAP_MOVEMENT_THRESHOLD_PX) {
+    clearPendingTap();
+    lastTapInfo = { time: 0, x: 0, y: 0 };
+    requestPlayerMove(hex, { mode: 'run', silentIfSame: true });
+    return;
+  }
+
+  lastTapInfo = { time: now, x: clientX, y: clientY };
+  clearPendingTap();
+  pendingTapHex = hex;
+  pendingTapTimeoutId = window.setTimeout(() => {
+    if (pendingTapHex) {
+      requestPlayerMove(pendingTapHex, { mode: 'walk', silentIfSame: true });
+    }
+    clearPendingTap();
+  }, DOUBLE_TAP_DELAY_MS);
 }
 
 function angleDifference(a, b) {
@@ -1529,8 +1976,8 @@ function axialDeltaToDirection(from, to) {
     return null;
   }
 
-  const px = SQRT3 * (dq + dr / 2);
-  const py = 1.5 * dr;
+  const px = dq * AXIAL_Q_VECTOR.x + dr * AXIAL_R_VECTOR.x;
+  const py = dq * AXIAL_Q_VECTOR.y + dr * AXIAL_R_VECTOR.y;
   if (px === 0 && py === 0) {
     return null;
   }
@@ -1555,26 +2002,109 @@ function handleCanvasPointerDown(event) {
     return;
   }
 
-  const hex = pickHexFromEvent(event);
-  if (!hex) {
+  if (event.pointerType === 'touch') {
+    if (activeTouchGesture && activeTouchGesture.pointerId !== event.pointerId) {
+      return;
+    }
+    event.preventDefault();
+    const hex = pickHexFromEvent(event);
+    if (hex) {
+      setHoveredHex(hex);
+    }
+    activeTouchGesture = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startTime: performance.now(),
+      lastHex: hex ?? null,
+      deltaX: 0,
+      deltaY: 0,
+    };
+    if (typeof canvas.setPointerCapture === 'function') {
+      try {
+        canvas.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // ignore capture errors on unsupported browsers
+      }
+    }
     return;
   }
 
-  const self = getSelfPlayer();
-  if (!self) {
-    addSystemMessage('Ожидание соединения с сервером...');
+  const hex = pickHexFromEvent(event);
+  requestPlayerMove(hex);
+}
+
+function handleCanvasPointerMove(event) {
+  if (activeOverlay) {
+    setHoveredHex(null);
     return;
   }
+
+  const hex = pickHexFromEvent(event);
+  setHoveredHex(hex);
 
   if (
-    self.position.axial.q === hex.q &&
-    self.position.axial.r === hex.r
+    event.pointerType === 'touch' &&
+    activeTouchGesture &&
+    activeTouchGesture.pointerId === event.pointerId
   ) {
-    addSystemMessage('Вы уже на выбранном гексе');
+    activeTouchGesture.lastHex = hex ?? activeTouchGesture.lastHex;
+    activeTouchGesture.deltaX = event.clientX - activeTouchGesture.startClientX;
+    activeTouchGesture.deltaY = event.clientY - activeTouchGesture.startClientY;
+  }
+}
+
+function handleCanvasPointerUp(event) {
+  if (event.pointerType !== 'touch') {
     return;
   }
 
-  sendMoveTo(hex);
+  if (!activeTouchGesture || activeTouchGesture.pointerId !== event.pointerId) {
+    return;
+  }
+
+  event.preventDefault();
+  const gesture = { ...activeTouchGesture };
+  clearTouchGesture(event.pointerId);
+
+  const deltaX = gesture.deltaX ?? event.clientX - gesture.startClientX;
+  const deltaY = gesture.deltaY ?? event.clientY - gesture.startClientY;
+  const distance = Math.hypot(deltaX, deltaY);
+
+  const hex = pickHexFromEvent(event) ?? gesture.lastHex ?? null;
+
+  if (distance >= SWIPE_MIN_DISTANCE_PX && Math.abs(deltaY) > Math.abs(deltaX)) {
+    adjustMapZoom(deltaY < 0 ? 1 : -1);
+    setHoveredHex(null);
+    return;
+  }
+
+  if (!hex) {
+    setHoveredHex(null);
+    return;
+  }
+
+  if (distance <= TAP_MOVEMENT_THRESHOLD_PX) {
+    processTouchTap(event, hex);
+  }
+
+  setHoveredHex(null);
+}
+
+function handleCanvasPointerCancel(event) {
+  if (event.pointerType !== 'touch') {
+    return;
+  }
+  clearTouchGesture(event.pointerId);
+  clearPendingTap();
+  setHoveredHex(null);
+}
+
+function handleCanvasPointerLeave() {
+  if (!hoveredHex) {
+    return;
+  }
+  setHoveredHex(null);
 }
 
 function connect() {
@@ -1651,6 +2181,7 @@ function handleInit(payload) {
     worldState.players.set(player.id, player);
   }
   computeLayout(worldState.grid);
+  hoveredHex = null;
   synchronizeVisualsWithWorld();
   renderWorld();
   addSystemMessage('Вы появились в центре пустоши');
@@ -1663,13 +2194,17 @@ function updatePlayer(player) {
   updateVisualForPlayer(player, previous);
 }
 
-function sendMoveTo(target) {
+function sendMoveTo(target, { mode } = {}) {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     addSystemMessage('Команда перемещения отклонена: нет соединения');
     return;
   }
+  const payload = { target };
+  if (mode) {
+    payload.mode = mode;
+  }
   socket.send(
-    JSON.stringify({ type: 'player:move', payload: { target } })
+    JSON.stringify({ type: 'player:move', payload })
   );
 }
 
@@ -1716,10 +2251,14 @@ window.addEventListener('keydown', event => {
     q: self.position.axial.q + vector.q,
     r: self.position.axial.r + vector.r,
   };
-  sendMoveTo(target);
+  sendMoveTo(target, { mode: 'run' });
 });
 
 canvas.addEventListener('pointerdown', handleCanvasPointerDown);
+canvas.addEventListener('pointermove', handleCanvasPointerMove);
+canvas.addEventListener('pointerup', handleCanvasPointerUp);
+canvas.addEventListener('pointercancel', handleCanvasPointerCancel);
+canvas.addEventListener('pointerleave', handleCanvasPointerLeave);
 
 if (chatFormEl && chatInputEl) {
   chatFormEl.addEventListener('submit', event => {
@@ -1783,12 +2322,17 @@ if (overlayLayerEl) {
 }
 
 window.addEventListener('resize', () => {
+  updateInputModeClass();
+  resizeCanvas();
   renderWorld();
 });
 
 await initializeUi();
 
+await loadInitialMap();
+
 addSystemMessage('Загрузка клиента...');
+resizeCanvas();
 renderWorld();
 startGameLoop();
 connect();
