@@ -22,16 +22,6 @@ export const AXIAL_Q_MINUS_R_VECTOR: Point = {
   y: AXIAL_Q_VECTOR.y - AXIAL_R_VECTOR.y,
 };
 
-export const DIAMOND_E1: Point = {
-  x: 3 * HALF_HEX_W,
-  y: -THREE_QUARTER_HEX_H,
-};
-
-export const DIAMOND_E2: Point = {
-  x: HALF_HEX_W,
-  y: THREE_QUARTER_HEX_H,
-};
-
 export interface CanvasMetrics {
   ctx: CanvasRenderingContext2D;
   cw: number;
@@ -90,25 +80,11 @@ export function strokePolygon(ctx: CanvasRenderingContext2D, pts: Point[]) {
   ctx.stroke();
 }
 
-export function tileQuad(origin: Point, i: number, j: number): Point[] {
-  const offsetX = DIAMOND_E1.x * i + DIAMOND_E2.x * j;
-  const offsetY = DIAMOND_E1.y * i + DIAMOND_E2.y * j;
-  const v0: Point = {
-    x: Math.round(origin.x + offsetX),
-    y: Math.round(origin.y + offsetY),
-  };
-  const v1: Point = {
-    x: Math.round(v0.x + DIAMOND_E1.x),
-    y: Math.round(v0.y + DIAMOND_E1.y),
-  };
-  const v2: Point = {
-    x: Math.round(v1.x + DIAMOND_E2.x),
-    y: Math.round(v1.y + DIAMOND_E2.y),
-  };
-  const v3: Point = {
-    x: Math.round(v0.x + DIAMOND_E2.x),
-    y: Math.round(v0.y + DIAMOND_E2.y),
-  };
+export function tileQuad(origin: Point, q: number, r: number): Point[] {
+  const v0 = axialToPixel(q, r, origin);
+  const v1 = axialToPixel(q + 1, r, origin);
+  const v2 = axialToPixel(q + 1, r - 1, origin);
+  const v3 = axialToPixel(q, r - 1, origin);
   return [v0, v1, v2, v3];
 }
 
@@ -178,9 +154,9 @@ function renderAll(canvas: HTMLCanvasElement) {
   const tileRadius = 16;
   const centerMap = new Map<string, { key: string; center: Point }>();
 
-  for (let j = -tileRadius; j <= tileRadius; j += 1) {
-    for (let i = -tileRadius; i <= tileRadius; i += 1) {
-      const quad = tileQuad(origin, i, j);
+  for (let r = -tileRadius; r <= tileRadius; r += 1) {
+    for (let q = -tileRadius; q <= tileRadius; q += 1) {
+      const quad = tileQuad(origin, q, r);
       fillPolygon(ctx, quad);
       strokePolygon(ctx, quad);
       quad.forEach(vertex => {
