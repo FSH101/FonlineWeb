@@ -1,0 +1,12 @@
+{
+  "name": "canonical-demo",
+  "version": 1,
+  "tiles": [
+    { "type": "tile", "x": 1, "y": 1, "texture": "art\\tiles\\edg5001" },
+    { "type": "tile", "x": 2, "y": 1, "texture": "art\\tiles\\edg5001" },
+    { "type": "tile", "x": 1, "y": 2, "texture": "art\\tiles\\edg5001" },
+    { "type": "tile", "x": 2, "y": 2, "texture": "art\\tiles\\edg5001" },
+    { "type": "tile", "x": 1, "y": 3, "texture": "art\\tiles\\edg5001" },
+    { "type": "tile", "x": 2, "y": 3, "texture": "art\\tiles\\edg5001" }
+  ]
+}

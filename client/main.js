@@ -1,5 +1,6 @@
 import { loadUiConfig } from './ui/configLoader.js';
 import { tryLoadAnimation } from './player/heroSprite.js';
+import { loadMapDefinition, createTileTextureCache } from './map/mapData.js';
 import {
   HEX_W,
   HALF_HEX_W,
@@ -25,6 +26,16 @@ const mapView = {
   minZoom: 0.85,
   maxZoom: 2.4,
   step: 0.12,
+};
+
+const MAP_DEFINITION_URL = './assets/maps/canonical-demo.json';
+
+const tileTextureCache = createTileTextureCache();
+
+const mapState = {
+  definition: null,
+  tiles: [],
+  tileIndex: new Map(),
 };
 
 const DOUBLE_TAP_DELAY_MS = 280;
@@ -867,6 +878,8 @@ const layout = {
   offsetY: 0,
   rawTiles: [],
   bounds: null,
+  floorTiles: [],
+  floorTileCenters: new Map(),
 };
 
 resizeCanvas();
@@ -1107,11 +1120,99 @@ function getHexOrigin() {
   };
 }
 
+function polygonBounds(points) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  for (const point of points) {
+    if (!point) {
+      continue;
+    }
+    const x = Math.round(point.x);
+    const y = Math.round(point.y);
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) {
+    return { minX: 0, maxX: 0, minY: 0, maxY: 0, width: 0, height: 0 };
+  }
+
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+
+  return { minX, maxX, minY, maxY, width, height };
+}
+
 function drawMapBackground() {
   const origin = getHexOrigin();
   ctx.save();
   ctx.fillStyle = '#111111';
   ctx.fillRect(0, 0, canvasMetrics.width, canvasMetrics.height);
+
+  layout.floorTiles = [];
+  layout.floorTileCenters.clear();
+
+  const tiles = Array.isArray(mapState.tiles) ? mapState.tiles : [];
+
+  if (tiles.length > 0) {
+    ctx.lineWidth = 1;
+    ctx.lineJoin = 'miter';
+    ctx.lineCap = 'butt';
+
+    for (const tile of tiles) {
+      const quad = canonicalTileQuad(origin, tile.x, tile.y);
+      const bounds = polygonBounds(quad);
+      const centerX = Math.round((quad[0].x + quad[2].x) / 2);
+      const centerY = Math.round((quad[0].y + quad[2].y) / 2);
+
+      const floorEntry = {
+        id: tile.id,
+        x: tile.x,
+        y: tile.y,
+        quad,
+        centerX,
+        centerY,
+        bounds,
+        texture: tile.texture,
+        textureId: tile.textureId,
+      };
+
+      layout.floorTiles.push(floorEntry);
+      layout.floorTileCenters.set(tile.id, {
+        x: centerX,
+        y: centerY,
+        quad,
+        tile: floorEntry,
+      });
+
+      const textureRecord = tile.textureId ? tileTextureCache.get(tile.textureId) : null;
+
+      if (textureRecord && textureRecord.image) {
+        ctx.save();
+        ctx.beginPath();
+        canonicalTracePolygon(ctx, quad);
+        ctx.clip();
+        const drawWidth = Math.max(1, bounds.width);
+        const drawHeight = Math.max(1, bounds.height);
+        ctx.drawImage(textureRecord.image, bounds.minX, bounds.minY, drawWidth, drawHeight);
+        ctx.restore();
+      } else {
+        ctx.fillStyle = '#1f1f1f';
+        canonicalFillPolygon(ctx, quad);
+      }
+
+      ctx.strokeStyle = '#000000';
+      canonicalStrokePolygon(ctx, quad);
+    }
+
+    ctx.restore();
+    return;
+  }
 
   ctx.strokeStyle = '#000000';
   ctx.fillStyle = '#ffffff';
@@ -1134,6 +1235,48 @@ function drawMapBackground() {
   }
 
   ctx.restore();
+}
+
+function setMapDefinition(definition) {
+  mapState.definition = definition ?? { tiles: [] };
+  const tiles = Array.isArray(definition?.tiles) ? definition.tiles : [];
+  mapState.tiles = tiles.map(tile => ({
+    id: tile.id,
+    type: tile.type,
+    x: tile.x,
+    y: tile.y,
+    texture: tile.texture,
+    textureId: tile.textureId,
+  }));
+  mapState.tileIndex.clear();
+
+  for (const tile of mapState.tiles) {
+    mapState.tileIndex.set(tile.id, tile);
+    if (tile.textureId) {
+      tileTextureCache
+        .load(tile.textureId)
+        .then(record => {
+          if (record) {
+            renderWorld();
+          }
+        })
+        .catch(error => {
+          console.warn(`Не удалось загрузить текстуру плитки ${tile.textureId}`, error);
+        });
+    }
+  }
+}
+
+async function loadInitialMap() {
+  try {
+    const definition = await loadMapDefinition(MAP_DEFINITION_URL);
+    setMapDefinition(definition);
+  } catch (error) {
+    console.warn('Не удалось загрузить карту, используется пустая подложка', error);
+    mapState.definition = { tiles: [] };
+    mapState.tiles = [];
+    mapState.tileIndex.clear();
+  }
 }
 
 function drawHexOverlay() {
@@ -2185,6 +2328,8 @@ window.addEventListener('resize', () => {
 });
 
 await initializeUi();
+
+await loadInitialMap();
 
 addSystemMessage('Загрузка клиента...');
 resizeCanvas();
