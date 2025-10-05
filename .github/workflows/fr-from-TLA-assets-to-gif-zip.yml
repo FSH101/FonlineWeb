@@ -1,0 +1,200 @@
+name: FR (TLA assets_1/art) → GIF → ZIP (Release)
+
+on:
+  workflow_dispatch: {}
+  # плюс автозапуск, когда в TLA-репо обновили ассеты — руками триггерни или оставь только dispatch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # нужно для gh release upload
+
+    steps:
+      - name: Checkout THIS repo (FonlineWeb)
+        uses: actions/checkout@v4
+
+      - name: Checkout EXTERNAL repo (FSH101/TLA3.0TG) sparse to assets_1/art
+        uses: actions/checkout@v4
+        with:
+          repository: FSH101/TLA3.0TG
+          ref: codex/continue-work-on-project-per-tasks.md
+          path: ext_repo
+          fetch-depth: 1
+          sparse-checkout: |
+            assets_1/art
+          sparse-checkout-cone: true
+          # Если TLA3.0TG станет приватным, добавь в секреты EXTERNAL_REPO_TOKEN и раскомментируй:
+          # token: ${{ secrets.EXTERNAL_REPO_TOKEN }}
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pillow
+          sudo apt-get update && sudo apt-get install -y zip
+
+      - name: Write converter (FR → GIF, dirs named, asset_map)
+        shell: bash
+        run: |
+          cat > fr_to_gif.py << 'PY'
+          #!/usr/bin/env python3
+          # -*- coding: utf-8 -*-
+          import struct, sys, json
+          from pathlib import Path
+          from PIL import Image
+
+          # --- Палитра: индекс 0 = прозрачный. (Можно вставить «настоящую» Fallout-палитру позже.)
+          def _fallback_palette():
+              return [(0,0,0)] + [(i,i,i) for i in range(1,256)]
+          PALETTE = _fallback_palette()
+
+          def be_u16(b,o): return struct.unpack_from(">H",b,o)[0]
+          def be_s16(b,o): return struct.unpack_from(">h",b,o)[0]
+          def be_u32(b,o): return struct.unpack_from(">I",b,o)[0]
+
+          def parse_fr_bytes(data: bytes):
+              # Простая схема, которую мы уже использовали в твоих экшнах.
+              version=be_u32(data,0x00); fps=be_u16(data,0x04); action=be_u16(data,0x06); fpd=be_u16(data,0x08)
+              shiftX=[be_s16(data,0x0A+i*2) for i in range(6)]
+              shiftY=[be_s16(data,0x16+i*2) for i in range(6)]
+              dirOff=[be_u32(data,0x22+i*4) for i in range(6)]
+              base=0x3E
+              dirs=[]; maxW=maxH=0
+              for d in range(6):
+                  off=base+dirOff[d]; cur=off; frames=[]
+                  for _ in range(fpd):
+                      if cur+12 > len(data): break
+                      w=be_u16(data,cur); h=be_u16(data,cur+2); sz=be_u32(data,cur+4)
+                      xo=be_s16(data,cur+8); yo=be_s16(data,cur+10)
+                      if cur+12+sz > len(data): break
+                      raw=data[cur+12:cur+12+sz]
+                      frames.append({"w":w,"h":h,"xOff":xo,"yOff":yo,"idx":raw})
+                      maxW=max(maxW,w); maxH=max(maxH,h)
+                      cur+=12+sz
+                  dirs.append(frames)
+              return {"header":{"version":version,"fps":fps,"actionFrame":action,"framesPerDir":fpd,
+                                "shiftX":shiftX,"shiftY":shiftY,"dirOffsets":dirOff},
+                      "directions":dirs,"maxW":maxW,"maxH":maxH}
+
+          def frame_to_rgba(fr):
+              w,h = fr["w"], fr["h"]
+              raw = fr["idx"]
+              img = Image.new("RGBA",(w,h),(0,0,0,0))
+              px = img.load(); i=0
+              for y in range(h):
+                  for x in range(w):
+                      idx = raw[i]; i+=1
+                      if idx==0: px[x,y]=(0,0,0,0)
+                      else:
+                          r,g,b = PALETTE[idx]
+                          px[x,y]=(r,g,b,255)
+              return img
+
+          def classify(p: Path):
+              s=str(p).lower()
+              if any(t in s for t in ["crit","critter","people","human","npc","mut","dog","rat","gec","ant"]):
+                  return "critter","generic"
+              if any(t in s for t in ["tile","floor"]):
+                  return "tile","floor"
+              if any(t in s for t in ["item","inv","icon"]):
+                  return "item","item"
+              if any(t in s for t in ["wall","door","gate","tree","scen","decor","object"]):
+                  return "object","decor"
+              return "unknown","unknown"
+
+          DIR_LABELS = ["S","SW","W","NW","NE","E"]  # fallout order
+
+          def save_gif(frames_rgba, out_path: Path, fps: int):
+              mw = max(im.width for im in frames_rgba) if frames_rgba else 1
+              mh = max(im.height for im in frames_rgba) if frames_rgba else 1
+              seq=[]
+              for im in frames_rgba:
+                  canvas = Image.new("RGBA",(mw,mh),(0,0,0,0))
+                  # выравниваем по низу (как удобно для изометрии)
+                  canvas.paste(im, ((mw-im.width)//2, mh-im.height))
+                  seq.append(canvas.convert("P", palette=Image.ADAPTIVE, colors=255))
+              dur = max(1,int(1000/max(1, fps or 10)))
+              if len(seq)<=1:
+                  (seq[0] if seq else Image.new("P",(mw,mh))).save(out_path, save_all=False, optimize=True, transparency=0, disposal=2)
+              else:
+                  seq[0].save(out_path, save_all=True, append_images=seq[1:], loop=0,
+                              duration=dur, optimize=True, transparency=0, disposal=2)
+
+          def main():
+              src = Path("ext_repo/assets_1/art")  # ЖЁСТКО: внешний путь
+              out = Path("build/gif"); out.mkdir(parents=True, exist_ok=True)
+              exts = (".frm",".fr0",".fr1",".fr2",".fr3",".fr4",".fr5",".FRM",".FR0",".FR1",".FR2",".FR3",".FR4",".FR5")
+              files = sorted([p for p in src.rglob("*") if p.suffix in exts], key=lambda p:p.as_posix())
+
+              asset_map=[]
+              for i,p in enumerate(files,1):
+                  try:
+                      parsed = parse_fr_bytes(p.read_bytes())
+                  except Exception as e:
+                      print(f"[{i}/{len(files)}] {p.name} ERROR parse: {e}", file=sys.stderr)
+                      continue
+
+                  kind, cat = classify(p)
+                  base = out / kind / cat / p.stem
+                  base.mkdir(parents=True, exist_ok=True)
+
+                  for d_idx, frames in enumerate(parsed["directions"]):
+                      if not frames: continue
+                      ddir = None
+                      if kind=="critter":
+                          label = DIR_LABELS[d_idx] if d_idx < len(DIR_LABELS) else f"DIR{d_idx}"
+                          ddir = base / f"dir_{label}"
+                      else:
+                          ddir = base / f"dir_{d_idx}"
+                      ddir.mkdir(parents=True, exist_ok=True)
+
+                      rgba = [frame_to_rgba(fr) for fr in frames]
+                      save_gif(rgba, ddir / "anim.gif", parsed["header"]["fps"])
+
+                  asset_map.append({
+                      "in": str(p.relative_to(src).as_posix()),
+                      "out": str(base.relative_to(out).as_posix()),
+                      "kind": kind, "category": cat,
+                      "dirs": sum(1 for d in parsed["directions"] if d),
+                      "framesPerDir": parsed["header"]["framesPerDir"],
+                      "fps": parsed["header"]["fps"],
+                      "size": {"maxW": parsed["maxW"], "maxH": parsed["maxH"]},
+                  })
+                  print(f"[{i}/{len(files)}] {p.name} -> {base.relative_to(out).as_posix()}")
+
+              (out/"asset_map.json").write_text(json.dumps(asset_map, ensure_ascii=False, indent=2))
+              print("✅ Done:", out)
+
+          if __name__=="__main__":
+              main()
+          PY
+          chmod +x fr_to_gif.py
+
+      - name: Convert FR → GIF
+        run: |
+          mkdir -p build/gif
+          python fr_to_gif.py
+
+      - name: Pack ZIP
+        run: |
+          cd build
+          zip -r "fr_gifs_pack.zip" gif
+          ls -lah fr_gifs_pack.zip gif/asset_map.json
+
+      - name: Create/Upload Release in THIS repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="fr-gifs-$(date +%Y%m%d-%H%M%S)"
+          gh release create "$TAG" -t "$TAG" -n "FR → GIF pack from TLA3.0TG assets_1/art" || true
+          gh release upload "$TAG" "build/fr_gifs_pack.zip" --clobber
+          gh release upload "$TAG" "build/gif/asset_map.json" --clobber
+
+      - name: Upload artifact (for CI download)
+        uses: actions/upload-artifact@v4
+        with:
+          name: fr_gifs_pack
+          path: |
+            build/fr_gifs_pack.zip
+            build/gif/asset_map.json
