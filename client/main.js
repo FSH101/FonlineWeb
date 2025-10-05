@@ -1117,9 +1117,9 @@ function drawMapBackground() {
     Math.ceil(((canvasMetrics.width + canvasMetrics.height) / TILE_W) / zoom) + 4
   );
 
-  for (let r = -tileRadius; r <= tileRadius; r += 1) {
-    for (let q = -tileRadius; q <= tileRadius; q += 1) {
-      const quad = canonicalTileQuad(origin, q, r);
+  for (let tileRow = -tileRadius; tileRow <= tileRadius; tileRow += 1) {
+    for (let tileCol = -tileRadius; tileCol <= tileRadius; tileCol += 1) {
+      const quad = canonicalTileQuad(origin, tileCol, tileRow);
       canonicalFillPolygon(ctx, quad);
       canonicalStrokePolygon(ctx, quad);
     }

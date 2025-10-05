@@ -80,11 +80,18 @@ export function strokePolygon(ctx: CanvasRenderingContext2D, pts: Point[]) {
   ctx.stroke();
 }
 
-export function tileQuad(origin: Point, q: number, r: number): Point[] {
+export function tileIndexToAxial(i: number, j: number): { q: number; r: number } {
+  const q = i + j;
+  const r = -2 * i;
+  return { q, r };
+}
+
+export function tileQuad(origin: Point, i: number, j: number): Point[] {
+  const { q, r } = tileIndexToAxial(i, j);
   const v0 = axialToPixel(q, r, origin);
-  const v1 = axialToPixel(q + 1, r, origin);
-  const v2 = axialToPixel(q + 1, r - 1, origin);
-  const v3 = axialToPixel(q, r - 1, origin);
+  const v1 = axialToPixel(q + 1, r - 2, origin);
+  const v2 = axialToPixel(q + 2, r - 2, origin);
+  const v3 = axialToPixel(q + 1, r, origin);
   return [v0, v1, v2, v3];
 }
 
@@ -154,9 +161,9 @@ function renderAll(canvas: HTMLCanvasElement) {
   const tileRadius = 16;
   const centerMap = new Map<string, { key: string; center: Point }>();
 
-  for (let r = -tileRadius; r <= tileRadius; r += 1) {
-    for (let q = -tileRadius; q <= tileRadius; q += 1) {
-      const quad = tileQuad(origin, q, r);
+  for (let j = -tileRadius; j <= tileRadius; j += 1) {
+    for (let i = -tileRadius; i <= tileRadius; i += 1) {
+      const quad = tileQuad(origin, i, j);
       fillPolygon(ctx, quad);
       strokePolygon(ctx, quad);
       quad.forEach(vertex => {
