@@ -1825,8 +1825,8 @@ function axialDeltaToDirection(from, to) {
     return null;
   }
 
-  const px = dq * HEX_V1.x + dr * HEX_V2.x;
-  const py = dq * HEX_V1.y + dr * HEX_V2.y;
+  const px = dq * AXIAL_Q_VECTOR.x + dr * AXIAL_R_VECTOR.x;
+  const py = dq * AXIAL_Q_VECTOR.y + dr * AXIAL_R_VECTOR.y;
   if (px === 0 && py === 0) {
     return null;
   }
