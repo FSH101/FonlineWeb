@@ -124,7 +124,7 @@ const fallbackUiConfig = {
     MoveDuration: '280',
     Scale: '2',
     OffsetX: '0',
-    OffsetY: '-28',
+    OffsetY: '0',
     DefaultFacing: 'southEast',
   },
   Action: {
@@ -211,9 +211,11 @@ const DEFAULT_PLAYER_SETTINGS = {
   moveDuration: 280,
   scale: 2,
   offsetX: 0,
-  offsetY: -28,
+  offsetY: 0,
   defaultFacing: 'southEast',
 };
+
+const LEGACY_PLAYER_OFFSET_Y = -28;
 
 const playerSettings = { ...DEFAULT_PLAYER_SETTINGS };
 
@@ -314,7 +316,11 @@ function applyPlayerSettings(config) {
   playerSettings.moveDuration = parseNumber(config.MoveDuration, DEFAULT_PLAYER_SETTINGS.moveDuration);
   playerSettings.scale = parseNumber(config.Scale, DEFAULT_PLAYER_SETTINGS.scale);
   playerSettings.offsetX = parseNumber(config.OffsetX, DEFAULT_PLAYER_SETTINGS.offsetX);
-  playerSettings.offsetY = parseNumber(config.OffsetY, DEFAULT_PLAYER_SETTINGS.offsetY);
+  const configuredOffsetY = parseNumber(config.OffsetY, DEFAULT_PLAYER_SETTINGS.offsetY);
+  playerSettings.offsetY =
+    configuredOffsetY === LEGACY_PLAYER_OFFSET_Y
+      ? DEFAULT_PLAYER_SETTINGS.offsetY
+      : configuredOffsetY;
 
   const defaultFacing = config.DefaultFacing?.trim();
   playerSettings.defaultFacing =
@@ -1223,13 +1229,13 @@ function drawPlayerVisual(visual, isSelf) {
   }
 
   const scale = playerSettings.scale || 1;
-  const drawWidth = frame.width * scale;
-  const drawHeight = frame.height * scale;
-  const anchorX = (frame.anchorX ?? frame.width / 2) * scale;
-  const anchorY = (frame.anchorY ?? frame.height) * scale;
+  const drawWidth = Math.round(frame.width * scale);
+  const drawHeight = Math.round(frame.height * scale);
+  const anchorX = Math.round((frame.anchorX ?? frame.width / 2) * scale);
+  const anchorY = Math.round((frame.anchorY ?? frame.height) * scale);
 
-  const drawX = visual.currentPosition.x - anchorX + playerSettings.offsetX;
-  const drawY = visual.currentPosition.y - anchorY + playerSettings.offsetY;
+  const drawX = Math.round(visual.currentPosition.x - anchorX + playerSettings.offsetX);
+  const drawY = Math.round(visual.currentPosition.y - anchorY + playerSettings.offsetY);
 
   ctx.save();
   ctx.imageSmoothingEnabled = false;
