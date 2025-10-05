@@ -1,7 +1,14 @@
-import { TILE_W, TILE_H, drawFloorGrid } from './MapRenderer';
+import {
+  TILE_W,
+  TILE_H,
+  HALF_TILE_W,
+  HALF_TILE_H,
+  drawFloorGrid,
+  trimTileImage,
+} from './MapRenderer';
 
 const canvas = document.getElementById('map') as HTMLCanvasElement | null;
-const ctx = canvas?.getContext('2d') ?? null;
+let ctx: CanvasRenderingContext2D | null = canvas?.getContext('2d') ?? null;
 
 const TILE_TEXTURE_SOURCES = [
   'https://raw.githubusercontent.com/FSH101/TLA3.0TG/main/assets/object/item/BRICK01/dir_0/frame_00.png',
@@ -11,18 +18,64 @@ const TILE_TEXTURE_SOURCES = [
   '/assets/tiles/floor_80x36.png',
 ];
 
-let tileImage: HTMLImageElement | null = null;
+const GRID_COLS = 30;
+const GRID_ROWS = 30;
+
+const canvasState = {
+  width: 0,
+  height: 0,
+  dpr: 1,
+};
+
+const v1 = { x: HALF_TILE_W, y: HALF_TILE_H };
+const v2 = { x: -HALF_TILE_W, y: HALF_TILE_H };
+const v3 = { x: TILE_W, y: 0 };
+
+let tileImage: CanvasImageSource | null = null;
+let hexOrigin = { x: 0, y: 0 };
+let floorOrigin = { x: 0, y: 0 };
+
+function setupCanvas(target: HTMLCanvasElement, context: CanvasRenderingContext2D) {
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const rect = target.getBoundingClientRect();
+  const cssWidth = Math.max(1, Math.round(rect.width));
+  const cssHeight = Math.max(1, Math.round(rect.height));
+  const physicalWidth = Math.max(1, Math.round(cssWidth * dpr));
+  const physicalHeight = Math.max(1, Math.round(cssHeight * dpr));
+
+  target.width = physicalWidth;
+  target.height = physicalHeight;
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  context.imageSmoothingEnabled = false;
+
+  canvasState.width = cssWidth;
+  canvasState.height = cssHeight;
+  canvasState.dpr = dpr;
+}
+
+function updateOrigins() {
+  const gridWidth = (GRID_COLS + GRID_ROWS) * HALF_TILE_W;
+  const gridHeight = (GRID_COLS + GRID_ROWS) * HALF_TILE_H;
+  const originX = Math.round(canvasState.width / 2);
+  const originY = Math.round(canvasState.height / 2 - gridHeight / 2 + TILE_H / 2);
+
+  floorOrigin = { x: originX, y: originY };
+  hexOrigin = { x: originX, y: originY - HALF_TILE_H };
+}
 
 function resize() {
-  if (!canvas || !ctx) {
+  if (!canvas) {
     return;
   }
 
-  const dpr = Math.max(1, window.devicePixelRatio || 1);
-  canvas.width = Math.floor(canvas.clientWidth * dpr);
-  canvas.height = Math.floor(canvas.clientHeight * dpr);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.imageSmoothingEnabled = false;
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return;
+  }
+
+  ctx = context;
+  setupCanvas(canvas, context);
+  updateOrigins();
 }
 
 async function loadImageSequentially(sources: string[]) {
@@ -53,11 +106,86 @@ async function ensureTileImage() {
   }
 
   try {
-    tileImage = await loadImageSequentially(TILE_TEXTURE_SOURCES);
+    const image = await loadImageSequentially(TILE_TEXTURE_SOURCES);
+    tileImage = trimTileImage(image);
     render();
   } catch (error) {
     console.error(error);
   }
+}
+
+function prepareFrame() {
+  if (!canvas || !ctx) {
+    return;
+  }
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+  ctx.setTransform(canvasState.dpr, 0, 0, canvasState.dpr, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+}
+
+function hexCenter(q: number, r: number) {
+  const x = Math.round(hexOrigin.x + q * v1.x + r * v2.x);
+  const y = Math.round(hexOrigin.y + q * v1.y + r * v2.y);
+  return { x, y };
+}
+
+function hexPolygonPoints(centerX: number, centerY: number) {
+  return [
+    { x: Math.round(centerX + 0.5 * v1.x), y: Math.round(centerY + 0.5 * v1.y) },
+    { x: Math.round(centerX + 0.5 * v3.x), y: Math.round(centerY + 0.5 * v3.y) },
+    { x: Math.round(centerX - 0.5 * v2.x), y: Math.round(centerY - 0.5 * v2.y) },
+    { x: Math.round(centerX - 0.5 * v1.x), y: Math.round(centerY - 0.5 * v1.y) },
+    { x: Math.round(centerX - 0.5 * v3.x), y: Math.round(centerY - 0.5 * v3.y) },
+    { x: Math.round(centerX + 0.5 * v2.x), y: Math.round(centerY + 0.5 * v2.y) },
+  ];
+}
+
+function strokeHex(centerX: number, centerY: number) {
+  if (!ctx) {
+    return;
+  }
+
+  const points = hexPolygonPoints(centerX, centerY);
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i += 1) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+  ctx.closePath();
+}
+
+function drawHexGrid(qMin: number, qMax: number, rMin: number, rMax: number) {
+  if (!ctx) {
+    return;
+  }
+
+  ctx.save();
+  ctx.globalAlpha = 0.85;
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(64, 255, 128, 0.7)';
+  ctx.beginPath();
+  for (let r = rMin; r <= rMax; r += 1) {
+    for (let q = qMin; q <= qMax; q += 1) {
+      const { x, y } = hexCenter(q, r);
+      strokeHex(x, y);
+    }
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawOriginMarker() {
+  if (!ctx) {
+    return;
+  }
+  const { x, y } = hexCenter(0, 0);
+  ctx.save();
+  ctx.fillStyle = 'rgba(255, 96, 64, 0.9)';
+  ctx.fillRect(x - 1, y - 1, 3, 3);
+  ctx.restore();
 }
 
 function render() {
@@ -65,23 +193,23 @@ function render() {
     return;
   }
 
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  prepareFrame();
+
+  ctx.fillStyle = '#010101';
+  ctx.fillRect(0, 0, canvasState.width, canvasState.height);
 
   if (tileImage) {
-    const cols = 30;
-    const rows = 30;
-    const gridW = (cols + rows) * (TILE_W / 2);
-    const gridH = (cols + rows) * (TILE_H / 2);
-    const originX = Math.floor(canvas.clientWidth / 2);
-    const originY = Math.floor(canvas.clientHeight / 2 - gridH / 2 + TILE_H / 2);
-
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    drawFloorGrid(ctx, tileImage, cols, rows, originX, originY);
+    drawFloorGrid(ctx, tileImage, GRID_COLS, GRID_ROWS, floorOrigin.x, floorOrigin.y);
     ctx.restore();
-  } else {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const qMin = -GRID_ROWS;
+    const qMax = GRID_COLS;
+    const rMin = -GRID_ROWS;
+    const rMax = GRID_COLS;
+    drawHexGrid(qMin, qMax, rMin, rMax);
+    drawOriginMarker();
   }
 }
 

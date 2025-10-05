@@ -3,11 +3,19 @@ import { tryLoadAnimation } from './player/heroSprite.js';
 import {
   TILE_W as FLOOR_TILE_W,
   TILE_H as FLOOR_TILE_H,
+  HALF_TILE_W as FLOOR_HALF_TILE_W,
+  HALF_TILE_H as FLOOR_HALF_TILE_H,
   drawFloorGrid,
+  trimTileImage,
 } from './map/MapRenderer.js';
 
-const HEX_SIZE = 24;
-const SQRT3 = Math.sqrt(3);
+const TILE_W = FLOOR_TILE_W;
+const TILE_H = FLOOR_TILE_H;
+const HEX_DX = FLOOR_HALF_TILE_W;
+const HEX_DY = FLOOR_HALF_TILE_H;
+const HEX_V1 = { x: HEX_DX, y: HEX_DY };
+const HEX_V2 = { x: -HEX_DX, y: HEX_DY };
+const HEX_V3 = { x: TILE_W, y: 0 };
 const MAP_TEXTURE_BASE_URLS = [
   'https://raw.githubusercontent.com/FSH101/TLA3.0TG/main/assets/object/item/BRICK01',
   'https://raw.githubusercontent.com/FSH101/TLA3.0TG/master/assets/object/item/BRICK01',
@@ -17,13 +25,6 @@ const MAP_TEXTURE_BASE_URLS = [
   '/client/assets/object/item/BRICK01',
 ];
 const MAP_TEXTURE_RELATIVE_PATH = 'dir_0/frame_00.png';
-
-const FALLOUT_TILE_WIDTH = FLOOR_TILE_W;
-const FALLOUT_TILE_HEIGHT = FLOOR_TILE_H;
-const FALLOUT_TILE_EDGE_RADIANS = Math.atan2(FALLOUT_TILE_HEIGHT, FALLOUT_TILE_WIDTH);
-
-const DEFAULT_MAP_TILE_WIDTH = FALLOUT_TILE_WIDTH;
-const DEFAULT_MAP_TILE_HEIGHT = FALLOUT_TILE_HEIGHT;
 
 const mapView = {
   zoom: 1,
@@ -50,9 +51,9 @@ const DIRECTION_VECTORS = {
 };
 
 const DIRECTION_METADATA = Object.entries(DIRECTION_VECTORS).map(([name, vector]) => {
-  const px = SQRT3 * (vector.q + vector.r / 2);
-  const py = 1.5 * vector.r;
-  const angle = Math.atan2(py, px);
+  const dx = vector.q * HEX_V1.x + vector.r * HEX_V2.x;
+  const dy = vector.q * HEX_V1.y + vector.r * HEX_V2.y;
+  const angle = Math.atan2(dy, dx);
   return { name, angle };
 });
 
@@ -806,11 +807,54 @@ async function initializeUi() {
 const canvas = document.getElementById('hexCanvas');
 const ctx = canvas.getContext('2d');
 
+const canvasMetrics = {
+  width: Math.max(1, Math.round(canvas?.clientWidth ?? 1)),
+  height: Math.max(1, Math.round(canvas?.clientHeight ?? 1)),
+  dpr: 1,
+};
+
+function resizeCanvas() {
+  if (!canvas || !ctx) {
+    return;
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  const cssWidth = Math.max(1, Math.round(rect.width));
+  const cssHeight = Math.max(1, Math.round(rect.height));
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const physicalWidth = Math.max(1, Math.round(cssWidth * dpr));
+  const physicalHeight = Math.max(1, Math.round(cssHeight * dpr));
+
+  if (canvas.width !== physicalWidth || canvas.height !== physicalHeight) {
+    canvas.width = physicalWidth;
+    canvas.height = physicalHeight;
+  }
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+
+  canvasMetrics.width = cssWidth;
+  canvasMetrics.height = cssHeight;
+  canvasMetrics.dpr = dpr;
+
+  updateLayoutScreenPositions();
+}
+
+function prepareCanvasFrame() {
+  if (!canvas || !ctx) {
+    return;
+  }
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+  ctx.setTransform(canvasMetrics.dpr, 0, 0, canvasMetrics.dpr, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+}
+
 let mapTextureImage = null;
 let mapTextureReady = false;
-let mapTileWidth = DEFAULT_MAP_TILE_WIDTH;
-let mapTileHeight = DEFAULT_MAP_TILE_HEIGHT;
-let mapGridPattern = null;
 
 function joinUrl(base, path) {
   if (!path) {
@@ -855,45 +899,6 @@ function collectMapTextureSources() {
   return uniqueSources;
 }
 
-function updateIsometricGridPattern() {
-  const tileWidth = mapTileWidth || DEFAULT_MAP_TILE_WIDTH;
-  const tileHeight = mapTileHeight || DEFAULT_MAP_TILE_HEIGHT;
-
-  if (!tileWidth || !tileHeight) {
-    mapGridPattern = null;
-    return;
-  }
-
-  const patternCanvas = document.createElement('canvas');
-  patternCanvas.width = tileWidth;
-  patternCanvas.height = tileHeight;
-
-  const patternCtx = patternCanvas.getContext('2d');
-  patternCtx.imageSmoothingEnabled = false;
-
-  const midX = tileWidth / 2;
-  const midY = tileHeight / 2;
-  const isoHalfHeight = Math.tan(FALLOUT_TILE_EDGE_RADIANS) * midX;
-  const verticalOffset = midY - isoHalfHeight;
-
-  patternCtx.strokeStyle = 'rgba(12, 9, 6, 0.42)';
-  patternCtx.lineWidth = 1;
-  patternCtx.lineJoin = 'miter';
-  patternCtx.lineCap = 'butt';
-
-  const crispOffset = 0.5;
-
-  patternCtx.beginPath();
-  patternCtx.moveTo(midX + crispOffset, verticalOffset + crispOffset);
-  patternCtx.lineTo(tileWidth + crispOffset, midY + crispOffset);
-  patternCtx.lineTo(midX + crispOffset, tileHeight - verticalOffset + crispOffset);
-  patternCtx.lineTo(crispOffset, midY + crispOffset);
-  patternCtx.closePath();
-  patternCtx.stroke();
-
-  mapGridPattern = ctx.createPattern(patternCanvas, 'repeat');
-}
-
 function loadTileImage(url) {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -910,20 +915,8 @@ async function loadMapTexture() {
   for (const source of sources) {
     try {
       const image = await loadTileImage(source);
-      const effectiveWidth = Math.max(
-        image.naturalWidth || image.width || DEFAULT_MAP_TILE_WIDTH,
-        1
-      );
-      const effectiveHeight = Math.max(
-        image.naturalHeight || image.height || DEFAULT_MAP_TILE_HEIGHT,
-        1
-      );
-
-      mapTextureImage = image;
-      mapTileWidth = effectiveWidth;
-      mapTileHeight = effectiveHeight;
+      mapTextureImage = trimTileImage(image);
       mapTextureReady = true;
-      updateIsometricGridPattern();
       renderWorld();
       return;
     } catch (error) {
@@ -932,12 +925,10 @@ async function loadMapTexture() {
   }
 
   mapTextureImage = null;
-  updateIsometricGridPattern();
   mapTextureReady = false;
   console.error('Все источники текстуры карты недоступны');
 }
 
-updateIsometricGridPattern();
 loadMapTexture();
 
 const worldState = {
@@ -949,9 +940,14 @@ const worldState = {
 const layout = {
   tileCenters: new Map(),
   orderedTiles: [],
+  origin: { x: 0, y: 0 },
   offsetX: 0,
   offsetY: 0,
+  rawTiles: [],
+  bounds: null,
 };
+
+resizeCanvas();
 
 let socket;
 let hoveredHex = null;
@@ -1155,157 +1151,114 @@ function axialKey(q, r) {
 }
 
 function axialToPixelRaw(q, r) {
-  return {
-    x: HEX_SIZE * SQRT3 * (q + r / 2),
-    y: HEX_SIZE * 1.5 * r,
-  };
+  const x = Math.round(HEX_DX * (q - r));
+  const y = Math.round(HEX_DY * (q + r));
+  return { x, y };
 }
 
-function hexPath(centerX, centerY, size) {
-  ctx.beginPath();
-  for (let i = 0; i < 6; i += 1) {
-    const angle = ((60 * i - 30) * Math.PI) / 180;
-    const x = centerX + size * Math.cos(angle);
-    const y = centerY + size * Math.sin(angle);
-    if (i === 0) {
-      ctx.moveTo(x, y);
-    } else {
-      ctx.lineTo(x, y);
-    }
+function hexPolygonPoints(centerX, centerY) {
+  return [
+    { x: Math.round(centerX + 0.5 * HEX_V1.x), y: Math.round(centerY + 0.5 * HEX_V1.y) },
+    { x: Math.round(centerX + 0.5 * HEX_V3.x), y: Math.round(centerY + 0.5 * HEX_V3.y) },
+    { x: Math.round(centerX - 0.5 * HEX_V2.x), y: Math.round(centerY - 0.5 * HEX_V2.y) },
+    { x: Math.round(centerX - 0.5 * HEX_V1.x), y: Math.round(centerY - 0.5 * HEX_V1.y) },
+    { x: Math.round(centerX - 0.5 * HEX_V3.x), y: Math.round(centerY - 0.5 * HEX_V3.y) },
+    { x: Math.round(centerX + 0.5 * HEX_V2.x), y: Math.round(centerY + 0.5 * HEX_V2.y) },
+  ];
+}
+
+function traceHexPath(centerX, centerY) {
+  const points = hexPolygonPoints(centerX, centerY);
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i += 1) {
+    ctx.lineTo(points[i].x, points[i].y);
   }
   ctx.closePath();
 }
 
-function drawHexTile(centerX, centerY, variant = 0) {
-  const basePalette = ['#2a2417', '#322a1c', '#3b311f'];
-  const overlayPalette = ['#4b4126', '#5a4b2a', '#463c26'];
-  const detailPalette = ['#756036', '#7f6a3a', '#6d5731'];
-  const idx = Math.abs(variant) % basePalette.length;
-
+function drawHighlight(centerX, centerY, color, lineWidth = Math.max(2, Math.round(TILE_W * 0.09))) {
   ctx.save();
-
-  hexPath(centerX, centerY, HEX_SIZE);
-  ctx.fillStyle = basePalette[idx];
-  ctx.fill();
-
-  ctx.lineWidth = Math.max(HEX_SIZE * 0.12, 1.5);
-  ctx.strokeStyle = '#1a1208';
-  ctx.stroke();
-
-  hexPath(centerX, centerY, HEX_SIZE * 0.82);
-  ctx.fillStyle = overlayPalette[idx];
-  ctx.fill();
-
-  const insetWidth = HEX_SIZE * 0.9;
-  const insetHeight = HEX_SIZE * 0.4;
-  ctx.fillStyle = detailPalette[idx];
-  ctx.globalAlpha = 0.45;
-  ctx.fillRect(
-    centerX - insetWidth / 2,
-    centerY - insetHeight / 2,
-    insetWidth,
-    insetHeight
-  );
-
-  ctx.restore();
-}
-
-function drawHighlight(centerX, centerY, color, lineWidth = HEX_SIZE * 0.18) {
-  ctx.save();
-  hexPath(centerX, centerY, HEX_SIZE * 0.94);
+  ctx.beginPath();
+  traceHexPath(centerX, centerY);
   ctx.lineWidth = lineWidth;
   ctx.strokeStyle = color;
   ctx.shadowColor = color;
-  ctx.shadowBlur = Math.max(HEX_SIZE * 0.35, 8);
+  ctx.shadowBlur = Math.max(Math.round(TILE_W * 0.3), 8);
   ctx.stroke();
   ctx.restore();
 }
 
-function drawMapBackground() {
-  const tileWidth = mapTileWidth || DEFAULT_MAP_TILE_WIDTH;
-  const tileHeight = mapTileHeight || DEFAULT_MAP_TILE_HEIGHT;
-
-  if (mapTextureReady && mapTextureImage && tileWidth && tileHeight) {
-    const coverageEstimate = Math.ceil((canvas.width + canvas.height) / tileWidth);
-    const cols = Math.max(30, coverageEstimate + 6);
-    const rows = Math.max(30, coverageEstimate + 6);
-    const gridHeight = (cols + rows) * (tileHeight / 2);
-    const originX = Math.floor(canvas.width / 2);
-    const originY = Math.floor(canvas.height / 2 - gridHeight / 2 + tileHeight / 2);
-
-    ctx.save();
-    ctx.imageSmoothingEnabled = false;
-    drawFloorGrid(ctx, mapTextureImage, cols, rows, originX, originY);
-    ctx.restore();
-    return;
+function getHexOrigin() {
+  if (layout.origin) {
+    return { x: Math.round(layout.origin.x), y: Math.round(layout.origin.y) };
   }
-
-  ctx.fillStyle = '#010101';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  return {
+    x: Math.round(canvasMetrics.width / 2),
+    y: Math.round(canvasMetrics.height / 2),
+  };
 }
 
-function drawIsometricGridOverlay() {
-  const tileWidth = mapTileWidth || DEFAULT_MAP_TILE_WIDTH;
-  const tileHeight = mapTileHeight || DEFAULT_MAP_TILE_HEIGHT;
-  if (!tileWidth || !tileHeight) {
+function getFloorOrigin() {
+  const origin = getHexOrigin();
+  return {
+    x: origin.x,
+    y: origin.y + HEX_DY,
+  };
+}
+
+function drawMapBackground() {
+  if (!(mapTextureReady && mapTextureImage)) {
+    ctx.fillStyle = '#010101';
+    ctx.fillRect(0, 0, canvasMetrics.width, canvasMetrics.height);
     return;
   }
 
-  const offsetX = ((layout.offsetX % tileWidth) + tileWidth) % tileWidth;
-  const offsetY = ((layout.offsetY % tileHeight) + tileHeight) % tileHeight;
+  const coverage = Math.max(
+    30,
+    Math.ceil((canvasMetrics.width + canvasMetrics.height) / TILE_W) + 6
+  );
+  const startIndex = -Math.floor(coverage / 2);
+  const floorOrigin = getFloorOrigin();
 
-  if (mapGridPattern && mapTileWidth && mapTileHeight) {
-    ctx.save();
-    ctx.translate(-offsetX, -offsetY);
-    ctx.fillStyle = mapGridPattern;
-    ctx.fillRect(-tileWidth, -tileHeight, canvas.width + tileWidth * 2, canvas.height + tileHeight * 2);
-    ctx.restore();
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  drawFloorGrid(
+    ctx,
+    mapTextureImage,
+    coverage,
+    coverage,
+    Math.round(floorOrigin.x),
+    Math.round(floorOrigin.y),
+    { startCol: startIndex, startRow: startIndex }
+  );
+  ctx.restore();
+}
+
+function drawHexOverlay() {
+  if (!layout.orderedTiles.length) {
     return;
   }
 
   ctx.save();
+  ctx.globalAlpha = 0.85;
   ctx.lineWidth = 1;
-  ctx.strokeStyle = 'rgba(12, 9, 6, 0.42)';
-  ctx.translate(-offsetX, -offsetY);
-
-  const startX = -tileWidth;
-  const startY = -tileHeight;
-  const endX = canvas.width + tileWidth;
-  const endY = canvas.height + tileHeight;
-  const crispOffset = 0.5;
-  const halfWidth = tileWidth / 2;
-  const isoHalfHeight = Math.tan(FALLOUT_TILE_EDGE_RADIANS) * halfWidth;
-  const verticalOffset = tileHeight / 2 - isoHalfHeight;
-
+  ctx.strokeStyle = 'rgba(64, 255, 128, 0.4)';
   ctx.beginPath();
-  for (let x = startX; x <= endX; x += tileWidth) {
-    for (let y = startY; y <= endY; y += tileHeight) {
-      const baseX = x + crispOffset;
-      const baseY = y + crispOffset;
-      const midY = baseY + tileHeight / 2;
-      const topY = baseY + verticalOffset;
-      const bottomY = baseY + tileHeight - verticalOffset;
-
-      ctx.moveTo(baseX + halfWidth, topY);
-      ctx.lineTo(baseX + tileWidth, midY);
-      ctx.lineTo(baseX + halfWidth, bottomY);
-      ctx.lineTo(baseX, midY);
-      ctx.closePath();
-    }
+  for (const { centerX, centerY } of layout.orderedTiles) {
+    traceHexPath(centerX, centerY);
   }
   ctx.stroke();
-
   ctx.restore();
 }
 
 function drawPlayerFallback(centerX, centerY, isSelf) {
-  const radius = HEX_SIZE * 0.35;
+  const radius = Math.max(6, Math.round(Math.min(HEX_DX, HEX_DY) * 0.6));
   ctx.save();
   ctx.beginPath();
   ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
   ctx.fillStyle = isSelf ? '#c0ff56' : '#64a9ff';
   ctx.fill();
-  ctx.lineWidth = Math.max(HEX_SIZE * 0.1, 2);
+  ctx.lineWidth = Math.max(2, Math.round(radius * 0.35));
   ctx.strokeStyle = '#0d1208';
   ctx.stroke();
   ctx.restore();
@@ -1472,26 +1425,72 @@ function startGameLoop() {
 }
 
 function computeLayout(grid) {
-  const rawPositions = grid.tiles.map(tile => ({
-    tile,
-    ...axialToPixelRaw(tile.q, tile.r),
-  }));
-  const minX = Math.min(...rawPositions.map(p => p.x));
-  const maxX = Math.max(...rawPositions.map(p => p.x));
-  const minY = Math.min(...rawPositions.map(p => p.y));
-  const maxY = Math.max(...rawPositions.map(p => p.y));
-  const padding = HEX_SIZE * 2.5;
+  if (!grid || !Array.isArray(grid.tiles)) {
+    layout.rawTiles = [];
+    layout.bounds = null;
+    updateLayoutScreenPositions();
+    return;
+  }
 
-  canvas.width = Math.ceil(maxX - minX + padding * 2);
-  canvas.height = Math.ceil(maxY - minY + padding * 2);
+  const rawTiles = grid.tiles.map(tile => {
+    const { x, y } = axialToPixelRaw(tile.q, tile.r);
+    return { tile, rawX: x, rawY: y };
+  });
 
-  const offsetX = padding - minX;
-  const offsetY = padding - minY;
+  layout.rawTiles = rawTiles;
+
+  if (rawTiles.length === 0) {
+    layout.bounds = null;
+    updateLayoutScreenPositions();
+    return;
+  }
+
+  const xs = rawTiles.map(item => item.rawX);
+  const ys = rawTiles.map(item => item.rawY);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+
+  layout.bounds = { minX, maxX, minY, maxY };
+  updateLayoutScreenPositions();
+}
+
+function updateLayoutScreenPositions() {
+  const width = canvasMetrics.width;
+  const height = canvasMetrics.height;
+
+  if (!layout.rawTiles || layout.rawTiles.length === 0) {
+    layout.tileCenters.clear();
+    layout.orderedTiles = [];
+    const originX = Math.round(width / 2);
+    const originY = Math.round(height / 2);
+    layout.origin = { x: originX, y: originY };
+    layout.offsetX = originX;
+    layout.offsetY = originY;
+    return;
+  }
+
+  const bounds = layout.bounds;
+  const minX = bounds?.minX ?? Math.min(...layout.rawTiles.map(item => item.rawX));
+  const maxX = bounds?.maxX ?? Math.max(...layout.rawTiles.map(item => item.rawX));
+  const minY = bounds?.minY ?? Math.min(...layout.rawTiles.map(item => item.rawY));
+  const maxY = bounds?.maxY ?? Math.max(...layout.rawTiles.map(item => item.rawY));
+
+  const rawCenterX = Math.round((minX + maxX) / 2);
+  const rawCenterY = Math.round((minY + maxY) / 2);
+
+  const originX = Math.round(width / 2) - rawCenterX;
+  const originY = Math.round(height / 2) - rawCenterY;
+
+  layout.origin = { x: originX, y: originY };
+  layout.offsetX = originX;
+  layout.offsetY = originY;
 
   layout.tileCenters.clear();
-  layout.orderedTiles = rawPositions.map(({ tile, x, y }) => {
-    const centerX = x + offsetX;
-    const centerY = y + offsetY;
+  layout.orderedTiles = layout.rawTiles.map(({ tile, rawX, rawY }) => {
+    const centerX = Math.round(originX + rawX);
+    const centerY = Math.round(originY + rawY);
     layout.tileCenters.set(axialKey(tile.q, tile.r), {
       x: centerX,
       y: centerY,
@@ -1499,21 +1498,23 @@ function computeLayout(grid) {
     });
     return { tile, centerX, centerY };
   });
-
-  layout.offsetX = offsetX;
-  layout.offsetY = offsetY;
 }
 
 function renderWorld() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = '#000000';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (!ctx || !canvas) {
+    return;
+  }
+
+  prepareCanvasFrame();
+
+  ctx.fillStyle = '#010101';
+  ctx.fillRect(0, 0, canvasMetrics.width, canvasMetrics.height);
 
   ctx.save();
   applyMapViewTransform();
 
   drawMapBackground();
-  drawIsometricGridOverlay();
+  drawHexOverlay();
 
   if (!layout.orderedTiles.length) {
     ctx.restore();
@@ -1524,7 +1525,7 @@ function renderWorld() {
     const hoveredKey = axialKey(hoveredHex.q, hoveredHex.r);
     const hoveredCenter = layout.tileCenters.get(hoveredKey);
     if (hoveredCenter) {
-      drawHighlight(hoveredCenter.x, hoveredCenter.y, '#ffd86b', HEX_SIZE * 0.15);
+      drawHighlight(hoveredCenter.x, hoveredCenter.y, '#ffd86b', Math.max(2, Math.round(TILE_W * 0.08)));
     }
   }
 
@@ -1553,8 +1554,8 @@ function renderWorld() {
 }
 
 function applyMapViewTransform() {
-  const centerX = canvas.width / 2;
-  const centerY = canvas.height / 2;
+  const centerX = canvasMetrics.width / 2;
+  const centerY = canvasMetrics.height / 2;
   ctx.translate(centerX, centerY);
   ctx.scale(mapView.zoom, mapView.zoom);
   ctx.translate(-centerX, -centerY);
@@ -1713,8 +1714,8 @@ function getSelfPlayer() {
 }
 
 function viewToWorld(x, y) {
-  const centerX = canvas.width / 2;
-  const centerY = canvas.height / 2;
+  const centerX = canvasMetrics.width / 2;
+  const centerY = canvasMetrics.height / 2;
   return {
     x: (x - centerX) / mapView.zoom + centerX,
     y: (y - centerY) / mapView.zoom + centerY,
@@ -1723,19 +1724,18 @@ function viewToWorld(x, y) {
 
 function pointerToCanvas(event) {
   const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-  const rawX = (event.clientX - rect.left) * scaleX;
-  const rawY = (event.clientY - rect.top) * scaleY;
-  return viewToWorld(rawX, rawY);
+  const cssX = event.clientX - rect.left;
+  const cssY = event.clientY - rect.top;
+  return viewToWorld(cssX, cssY);
 }
 
 function pixelToAxial(x, y) {
-  const localX = x - layout.offsetX;
-  const localY = y - layout.offsetY;
+  const origin = getHexOrigin();
+  const px = x - origin.x;
+  const py = y - origin.y;
 
-  const q = ((SQRT3 / 3) * localX - (1 / 3) * localY) / HEX_SIZE;
-  const r = ((2 / 3) * localY) / HEX_SIZE;
+  const q = 0.5 * (px / HEX_DX + py / HEX_DY);
+  const r = 0.5 * (py / HEX_DY - px / HEX_DX);
   return hexRound(q, r);
 }
 
@@ -1930,8 +1930,8 @@ function axialDeltaToDirection(from, to) {
     return null;
   }
 
-  const px = SQRT3 * (dq + dr / 2);
-  const py = 1.5 * dr;
+  const px = dq * HEX_V1.x + dr * HEX_V2.x;
+  const py = dq * HEX_V1.y + dr * HEX_V2.y;
   if (px === 0 && py === 0) {
     return null;
   }
@@ -2277,12 +2277,14 @@ if (overlayLayerEl) {
 
 window.addEventListener('resize', () => {
   updateInputModeClass();
+  resizeCanvas();
   renderWorld();
 });
 
 await initializeUi();
 
 addSystemMessage('Загрузка клиента...');
+resizeCanvas();
 renderWorld();
 startGameLoop();
 connect();
