@@ -1,21 +1,44 @@
-const HEX_W = 120;
-const HEX_H = HEX_W / 2;
+export const HEX_W = 120;
+export const HEX_H = HEX_W / 2;
+export const HALF_HEX_W = HEX_W / 2;
+export const HALF_HEX_H = HEX_H / 2;
+export const HEX_H_QUARTER = HEX_H / 4;
+export const THREE_QUARTER_HEX_H = (3 * HEX_H) / 4;
 
 export type Point = { x: number; y: number };
 
-const E: Point = { x: +HEX_W, y: 0 };
-const NW: Point = { x: -HEX_W / 2, y: - (3 * HEX_H) / 4 };
+export const AXIAL_Q_VECTOR: Point = {
+  x: HALF_HEX_W,
+  y: THREE_QUARTER_HEX_H,
+};
 
-const e1: Point = { x: (3 * HEX_W) / 2, y: - (3 * HEX_H) / 4 };
-const e2: Point = { x: HEX_W / 2, y: (3 * HEX_H) / 4 };
+export const AXIAL_R_VECTOR: Point = {
+  x: -HALF_HEX_W,
+  y: THREE_QUARTER_HEX_H,
+};
 
-interface CanvasMetrics {
+export const AXIAL_Q_MINUS_R_VECTOR: Point = {
+  x: AXIAL_Q_VECTOR.x - AXIAL_R_VECTOR.x,
+  y: AXIAL_Q_VECTOR.y - AXIAL_R_VECTOR.y,
+};
+
+export const DIAMOND_E1: Point = {
+  x: 3 * HALF_HEX_W,
+  y: -THREE_QUARTER_HEX_H,
+};
+
+export const DIAMOND_E2: Point = {
+  x: HALF_HEX_W,
+  y: THREE_QUARTER_HEX_H,
+};
+
+export interface CanvasMetrics {
   ctx: CanvasRenderingContext2D;
   cw: number;
   ch: number;
 }
 
-function setupCanvas(canvas: HTMLCanvasElement): CanvasMetrics {
+export function setupCanvas(canvas: HTMLCanvasElement): CanvasMetrics {
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   const rect = canvas.getBoundingClientRect();
   const cssWidth = Math.max(1, Math.round(rect.width));
@@ -33,29 +56,19 @@ function setupCanvas(canvas: HTMLCanvasElement): CanvasMetrics {
   return { ctx, cw: cssWidth, ch: cssHeight };
 }
 
-function add(a: Point, b: Point): Point {
-  return { x: a.x + b.x, y: a.y + b.y };
-}
-
-function mul(a: Point, k: number): Point {
-  return { x: a.x * k, y: a.y * k };
-}
-
-function hexPoly(cx: number, cy: number): Point[] {
-  const w = HEX_W;
-  const h = HEX_H;
+export function hexPolygonPoints(cx: number, cy: number): Point[] {
   return [
-    { x: cx + 0, y: cy - h / 2 },
-    { x: cx + w / 2, y: cy - h / 4 },
-    { x: cx + w / 2, y: cy + h / 4 },
-    { x: cx + 0, y: cy + h / 2 },
-    { x: cx - w / 2, y: cy + h / 4 },
-    { x: cx - w / 2, y: cy - h / 4 },
+    { x: Math.round(cx), y: Math.round(cy - HALF_HEX_H) },
+    { x: Math.round(cx + HALF_HEX_W), y: Math.round(cy - HEX_H_QUARTER) },
+    { x: Math.round(cx + HALF_HEX_W), y: Math.round(cy + HEX_H_QUARTER) },
+    { x: Math.round(cx), y: Math.round(cy + HALF_HEX_H) },
+    { x: Math.round(cx - HALF_HEX_W), y: Math.round(cy + HEX_H_QUARTER) },
+    { x: Math.round(cx - HALF_HEX_W), y: Math.round(cy - HEX_H_QUARTER) },
   ];
 }
 
-function tracePolygon(ctx: CanvasRenderingContext2D, pts: Point[]) {
-  if (pts.length === 0) {
+export function tracePolygon(ctx: CanvasRenderingContext2D, pts: Point[]) {
+  if (!pts.length) {
     return;
   }
   ctx.moveTo(Math.round(pts[0].x), Math.round(pts[0].y));
@@ -65,39 +78,84 @@ function tracePolygon(ctx: CanvasRenderingContext2D, pts: Point[]) {
   ctx.closePath();
 }
 
-function fillPoly(ctx: CanvasRenderingContext2D, pts: Point[]) {
+export function fillPolygon(ctx: CanvasRenderingContext2D, pts: Point[]) {
   ctx.beginPath();
   tracePolygon(ctx, pts);
   ctx.fill();
 }
 
-function strokePoly(ctx: CanvasRenderingContext2D, pts: Point[]) {
+export function strokePolygon(ctx: CanvasRenderingContext2D, pts: Point[]) {
   ctx.beginPath();
   tracePolygon(ctx, pts);
   ctx.stroke();
 }
 
-function tileQuad(origin: Point, i: number, j: number): Point[] {
-  const offset = add(mul(e1, i), mul(e2, j));
-  const v0 = add(origin, offset);
-  const v1 = add(v0, e1);
-  const v2 = add(v1, e2);
-  const v3 = add(v0, e2);
+export function tileQuad(origin: Point, i: number, j: number): Point[] {
+  const offsetX = DIAMOND_E1.x * i + DIAMOND_E2.x * j;
+  const offsetY = DIAMOND_E1.y * i + DIAMOND_E2.y * j;
+  const v0: Point = {
+    x: Math.round(origin.x + offsetX),
+    y: Math.round(origin.y + offsetY),
+  };
+  const v1: Point = {
+    x: Math.round(v0.x + DIAMOND_E1.x),
+    y: Math.round(v0.y + DIAMOND_E1.y),
+  };
+  const v2: Point = {
+    x: Math.round(v1.x + DIAMOND_E2.x),
+    y: Math.round(v1.y + DIAMOND_E2.y),
+  };
+  const v3: Point = {
+    x: Math.round(v0.x + DIAMOND_E2.x),
+    y: Math.round(v0.y + DIAMOND_E2.y),
+  };
   return [v0, v1, v2, v3];
 }
 
-function screenToQR(x: number, y: number, origin: Point) {
+export function axialToPixel(q: number, r: number, origin: Point = { x: 0, y: 0 }): Point {
+  const x = origin.x + q * AXIAL_Q_VECTOR.x + r * AXIAL_R_VECTOR.x;
+  const y = origin.y + q * AXIAL_Q_VECTOR.y + r * AXIAL_R_VECTOR.y;
+  return { x: Math.round(x), y: Math.round(y) };
+}
+
+export function pixelToAxial(x: number, y: number, origin: Point = { x: 0, y: 0 }) {
   const px = x - origin.x;
   const py = y - origin.y;
-  const r = Math.round((-8 * py) / (3 * HEX_W));
-  const q = Math.round(px / HEX_W - (4 * py) / (3 * HEX_W));
+  const q = px / HEX_W + (2 * py) / (3 * HEX_H);
+  const r = -px / HEX_W + (2 * py) / (3 * HEX_H);
   return { q, r };
 }
 
-function hexCenter(q: number, r: number, origin: Point): Point {
-  const cx = origin.x + q * E.x + r * NW.x;
-  const cy = origin.y + q * E.y + r * NW.y;
-  return { x: Math.round(cx), y: Math.round(cy) };
+export type HexEdge = { a: Point; b: Point };
+
+export function uniqueHexEdges(points: { center: Point }[]): HexEdge[] {
+  const edges = new Map<string, HexEdge>();
+  const addEdge = (a: Point, b: Point) => {
+    const ax = Math.round(a.x);
+    const ay = Math.round(a.y);
+    const bx = Math.round(b.x);
+    const by = Math.round(b.y);
+    const key = ax < bx || (ax === bx && ay <= by)
+      ? `${ax}:${ay}|${bx}:${by}`
+      : `${bx}:${by}|${ax}:${ay}`;
+    if (!edges.has(key)) {
+      edges.set(key, {
+        a: { x: ax, y: ay },
+        b: { x: bx, y: by },
+      });
+    }
+  };
+
+  points.forEach(({ center }) => {
+    const polygon = hexPolygonPoints(center.x, center.y);
+    for (let i = 0; i < polygon.length; i += 1) {
+      const from = polygon[i];
+      const to = polygon[(i + 1) % polygon.length];
+      addEdge(from, to);
+    }
+  });
+
+  return Array.from(edges.values());
 }
 
 const selected = new Set<string>();
@@ -118,63 +176,28 @@ function renderAll(canvas: HTMLCanvasElement) {
   ctx.lineWidth = 1;
 
   const tileRadius = 16;
-  const vertexKeys = new Set<string>();
-  const addVertex = (p: Point) => {
-    const vx = Math.round(p.x);
-    const vy = Math.round(p.y);
-    vertexKeys.add(`${vx}:${vy}`);
-  };
+  const centerMap = new Map<string, { key: string; center: Point }>();
 
   for (let j = -tileRadius; j <= tileRadius; j += 1) {
     for (let i = -tileRadius; i <= tileRadius; i += 1) {
       const quad = tileQuad(origin, i, j);
-      fillPoly(ctx, quad);
-      strokePoly(ctx, quad);
-      quad.forEach(addVertex);
+      fillPolygon(ctx, quad);
+      strokePolygon(ctx, quad);
+      quad.forEach(vertex => {
+        const key = `${vertex.x}:${vertex.y}`;
+        if (!centerMap.has(key)) {
+          centerMap.set(key, { key, center: { x: vertex.x, y: vertex.y } });
+        }
+      });
     }
   }
 
-  const centers = Array.from(vertexKeys, (key) => {
-    const [sx, sy] = key.split(':').map(Number);
-    return { key, point: { x: sx, y: sy } };
-  });
-
-  const centerLookup = new Map<string, Point>();
-  centers.forEach(({ key, point }) => {
-    centerLookup.set(key, point);
-  });
-
-  type Edge = { a: Point; b: Point };
-  const edges = new Map<string, Edge>();
-  const storeEdge = (a: Point, b: Point) => {
-    const ax = Math.round(a.x);
-    const ay = Math.round(a.y);
-    const bx = Math.round(b.x);
-    const by = Math.round(b.y);
-    const key = ax < bx || (ax === bx && ay <= by)
-      ? `${ax}:${ay}|${bx}:${by}`
-      : `${bx}:${by}|${ax}:${ay}`;
-    if (!edges.has(key)) {
-      edges.set(key, {
-        a: { x: ax, y: ay },
-        b: { x: bx, y: by },
-      });
-    }
-  };
-
-  centers.forEach(({ point }) => {
-    const poly = hexPoly(point.x, point.y);
-    for (let i = 0; i < poly.length; i += 1) {
-      const a = poly[i];
-      const b = poly[(i + 1) % poly.length];
-      storeEdge(a, b);
-    }
-  });
+  const centers = Array.from(centerMap.values());
 
   ctx.strokeStyle = '#0f0';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  edges.forEach(({ a, b }) => {
+  uniqueHexEdges(centers).forEach(({ a, b }) => {
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
   });
@@ -183,23 +206,22 @@ function renderAll(canvas: HTMLCanvasElement) {
   if (selected.size > 0) {
     ctx.strokeStyle = '#f00';
     ctx.lineWidth = 2;
-    const keys = Array.from(selected);
-    keys.forEach((key) => {
-      const center = centerLookup.get(key);
-      if (!center) {
+    selected.forEach(key => {
+      const entry = centerMap.get(key);
+      if (!entry) {
         selected.delete(key);
         return;
       }
-      const poly = hexPoly(center.x, center.y);
+      const polygon = hexPolygonPoints(entry.center.x, entry.center.y);
       ctx.beginPath();
-      tracePolygon(ctx, poly);
+      tracePolygon(ctx, polygon);
       ctx.stroke();
     });
   }
 }
 
 function attachInteraction(canvas: HTMLCanvasElement) {
-  canvas.addEventListener('click', (event) => {
+  canvas.addEventListener('click', event => {
     if (!metricsCache) {
       metricsCache = setupCanvas(canvas);
     }
@@ -210,20 +232,24 @@ function attachInteraction(canvas: HTMLCanvasElement) {
       x: Math.round(metricsCache.cw / 2),
       y: Math.round(metricsCache.ch / 2),
     };
-    const { q, r } = screenToQR(localX, localY, origin);
-    const center = hexCenter(q, r, origin);
+
+    const axial = pixelToAxial(localX, localY, origin);
+    const roundedQ = Math.round(axial.q);
+    const roundedR = Math.round(axial.r);
+    const center = axialToPixel(roundedQ, roundedR, origin);
     const key = `${center.x}:${center.y}`;
+
     if (selected.has(key)) {
       selected.delete(key);
     } else {
       selected.add(key);
     }
+
     renderAll(canvas);
   });
 }
 
-function bootstrap() {
-  const canvas = document.getElementById('grid') as HTMLCanvasElement | null;
+export function bootstrapCanonicalGrid(canvas: HTMLCanvasElement | null) {
   if (!canvas) {
     return;
   }
@@ -232,4 +258,7 @@ function bootstrap() {
   window.addEventListener('resize', () => renderAll(canvas));
 }
 
-bootstrap();
+const defaultCanvas = document.getElementById('grid') as HTMLCanvasElement | null;
+if (defaultCanvas) {
+  bootstrapCanonicalGrid(defaultCanvas);
+}

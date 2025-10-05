@@ -1,30 +1,24 @@
 import { loadUiConfig } from './ui/configLoader.js';
 import { tryLoadAnimation } from './player/heroSprite.js';
 import {
-  TILE_W as FLOOR_TILE_W,
-  TILE_H as FLOOR_TILE_H,
-  HALF_TILE_W as FLOOR_HALF_TILE_W,
-  HALF_TILE_H as FLOOR_HALF_TILE_H,
-  drawFloorGrid,
-  trimTileImage,
-} from './map/MapRenderer.js';
+  HEX_W,
+  HALF_HEX_W,
+  THREE_QUARTER_HEX_H,
+  AXIAL_Q_VECTOR,
+  AXIAL_R_VECTOR,
+  tileQuad as canonicalTileQuad,
+  hexPolygonPoints as canonicalHexPolygonPoints,
+  axialToPixel as canonicalAxialToPixel,
+  pixelToAxial as canonicalPixelToAxial,
+  uniqueHexEdges as canonicalUniqueHexEdges,
+  fillPolygon as canonicalFillPolygon,
+  strokePolygon as canonicalStrokePolygon,
+  tracePolygon as canonicalTracePolygon,
+} from './map/CanonGrid.js';
 
-const TILE_W = FLOOR_TILE_W;
-const TILE_H = FLOOR_TILE_H;
-const HEX_DX = FLOOR_HALF_TILE_W;
-const HEX_DY = FLOOR_HALF_TILE_H;
-const HEX_V1 = { x: HEX_DX, y: HEX_DY };
-const HEX_V2 = { x: -HEX_DX, y: HEX_DY };
-const HEX_V3 = { x: TILE_W, y: 0 };
-const MAP_TEXTURE_BASE_URLS = [
-  'https://raw.githubusercontent.com/FSH101/TLA3.0TG/main/assets/object/item/BRICK01',
-  'https://raw.githubusercontent.com/FSH101/TLA3.0TG/master/assets/object/item/BRICK01',
-  'assets/object/item/BRICK01',
-  '/assets/object/item/BRICK01',
-  'client/assets/object/item/BRICK01',
-  '/client/assets/object/item/BRICK01',
-];
-const MAP_TEXTURE_RELATIVE_PATH = 'dir_0/frame_00.png';
+const TILE_W = HEX_W;
+const HEX_HALF_WIDTH = HALF_HEX_W;
+const HEX_THREE_QUARTER_HEIGHT = THREE_QUARTER_HEX_H;
 
 const mapView = {
   zoom: 1,
@@ -51,8 +45,8 @@ const DIRECTION_VECTORS = {
 };
 
 const DIRECTION_METADATA = Object.entries(DIRECTION_VECTORS).map(([name, vector]) => {
-  const dx = vector.q * HEX_V1.x + vector.r * HEX_V2.x;
-  const dy = vector.q * HEX_V1.y + vector.r * HEX_V2.y;
+  const dx = vector.q * AXIAL_Q_VECTOR.x + vector.r * AXIAL_R_VECTOR.x;
+  const dy = vector.q * AXIAL_Q_VECTOR.y + vector.r * AXIAL_R_VECTOR.y;
   const angle = Math.atan2(dy, dx);
   return { name, angle };
 });
@@ -853,84 +847,6 @@ function prepareCanvasFrame() {
   ctx.imageSmoothingEnabled = false;
 }
 
-let mapTextureImage = null;
-let mapTextureReady = false;
-
-function joinUrl(base, path) {
-  if (!path) {
-    return base;
-  }
-
-  if (!base) {
-    return path;
-  }
-
-  if (/^[a-z]+:\/\//i.test(path) || path.startsWith('/')) {
-    return path;
-  }
-
-  const normalizedBase = String(base).replace(/\/+$/, '');
-  const normalizedPath = String(path).replace(/^\/+/, '');
-  return `${normalizedBase}/${normalizedPath}`;
-}
-
-function collectMapTextureSources() {
-  const uniqueSources = [];
-  const seen = new Set();
-
-  for (const candidateBase of MAP_TEXTURE_BASE_URLS) {
-    if (typeof candidateBase !== 'string') {
-      continue;
-    }
-
-    const trimmedBase = candidateBase.trim();
-    if (!trimmedBase) {
-      continue;
-    }
-
-    const resolved = joinUrl(trimmedBase, MAP_TEXTURE_RELATIVE_PATH);
-    if (seen.has(resolved)) {
-      continue;
-    }
-    seen.add(resolved);
-    uniqueSources.push(resolved);
-  }
-
-  return uniqueSources;
-}
-
-function loadTileImage(url) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.crossOrigin = 'anonymous';
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error(`Не удалось загрузить карту: ${url}`));
-    image.src = url;
-  });
-}
-
-async function loadMapTexture() {
-  const sources = collectMapTextureSources();
-
-  for (const source of sources) {
-    try {
-      const image = await loadTileImage(source);
-      mapTextureImage = trimTileImage(image);
-      mapTextureReady = true;
-      renderWorld();
-      return;
-    } catch (error) {
-      console.warn('Не удалось загрузить текстуру карты', source, error);
-    }
-  }
-
-  mapTextureImage = null;
-  mapTextureReady = false;
-  console.error('Все источники текстуры карты недоступны');
-}
-
-loadMapTexture();
-
 const worldState = {
   grid: null,
   players: new Map(),
@@ -1151,29 +1067,16 @@ function axialKey(q, r) {
 }
 
 function axialToPixelRaw(q, r) {
-  const x = Math.round(HEX_DX * (q - r));
-  const y = Math.round(HEX_DY * (q + r));
-  return { x, y };
+  return canonicalAxialToPixel(q, r, { x: 0, y: 0 });
 }
 
 function hexPolygonPoints(centerX, centerY) {
-  return [
-    { x: Math.round(centerX + 0.5 * HEX_V1.x), y: Math.round(centerY + 0.5 * HEX_V1.y) },
-    { x: Math.round(centerX + 0.5 * HEX_V3.x), y: Math.round(centerY + 0.5 * HEX_V3.y) },
-    { x: Math.round(centerX - 0.5 * HEX_V2.x), y: Math.round(centerY - 0.5 * HEX_V2.y) },
-    { x: Math.round(centerX - 0.5 * HEX_V1.x), y: Math.round(centerY - 0.5 * HEX_V1.y) },
-    { x: Math.round(centerX - 0.5 * HEX_V3.x), y: Math.round(centerY - 0.5 * HEX_V3.y) },
-    { x: Math.round(centerX + 0.5 * HEX_V2.x), y: Math.round(centerY + 0.5 * HEX_V2.y) },
-  ];
+  return canonicalHexPolygonPoints(centerX, centerY);
 }
 
 function traceHexPath(centerX, centerY) {
   const points = hexPolygonPoints(centerX, centerY);
-  ctx.moveTo(points[0].x, points[0].y);
-  for (let i = 1; i < points.length; i += 1) {
-    ctx.lineTo(points[i].x, points[i].y);
-  }
-  ctx.closePath();
+  canonicalTracePolygon(ctx, points);
 }
 
 function drawHighlight(centerX, centerY, color, lineWidth = Math.max(2, Math.round(TILE_W * 0.09))) {
@@ -1198,39 +1101,30 @@ function getHexOrigin() {
   };
 }
 
-function getFloorOrigin() {
-  const origin = getHexOrigin();
-  return {
-    x: origin.x,
-    y: origin.y + HEX_DY,
-  };
-}
-
 function drawMapBackground() {
-  if (!(mapTextureReady && mapTextureImage)) {
-    ctx.fillStyle = '#010101';
-    ctx.fillRect(0, 0, canvasMetrics.width, canvasMetrics.height);
-    return;
+  const origin = getHexOrigin();
+  ctx.save();
+  ctx.fillStyle = '#111111';
+  ctx.fillRect(0, 0, canvasMetrics.width, canvasMetrics.height);
+
+  ctx.strokeStyle = '#000000';
+  ctx.fillStyle = '#ffffff';
+  ctx.lineWidth = 1;
+
+  const zoom = Math.max(mapView.zoom, 0.001);
+  const tileRadius = Math.max(
+    20,
+    Math.ceil(((canvasMetrics.width + canvasMetrics.height) / TILE_W) / zoom) + 4
+  );
+
+  for (let j = -tileRadius; j <= tileRadius; j += 1) {
+    for (let i = -tileRadius; i <= tileRadius; i += 1) {
+      const quad = canonicalTileQuad(origin, i, j);
+      canonicalFillPolygon(ctx, quad);
+      canonicalStrokePolygon(ctx, quad);
+    }
   }
 
-  const coverage = Math.max(
-    30,
-    Math.ceil((canvasMetrics.width + canvasMetrics.height) / TILE_W) + 6
-  );
-  const startIndex = -Math.floor(coverage / 2);
-  const floorOrigin = getFloorOrigin();
-
-  ctx.save();
-  ctx.imageSmoothingEnabled = false;
-  drawFloorGrid(
-    ctx,
-    mapTextureImage,
-    coverage,
-    coverage,
-    Math.round(floorOrigin.x),
-    Math.round(floorOrigin.y),
-    { startCol: startIndex, startRow: startIndex }
-  );
   ctx.restore();
 }
 
@@ -1240,19 +1134,24 @@ function drawHexOverlay() {
   }
 
   ctx.save();
-  ctx.globalAlpha = 0.85;
   ctx.lineWidth = 1;
-  ctx.strokeStyle = 'rgba(64, 255, 128, 0.4)';
+  ctx.strokeStyle = 'rgba(80, 255, 120, 0.9)';
   ctx.beginPath();
-  for (const { centerX, centerY } of layout.orderedTiles) {
-    traceHexPath(centerX, centerY);
-  }
+  const centers = layout.orderedTiles.map(({ centerX, centerY }) => ({
+    center: { x: centerX, y: centerY },
+  }));
+  const edges = canonicalUniqueHexEdges(centers);
+  edges.forEach(({ a, b }) => {
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+  });
   ctx.stroke();
   ctx.restore();
 }
 
 function drawPlayerFallback(centerX, centerY, isSelf) {
-  const radius = Math.max(6, Math.round(Math.min(HEX_DX, HEX_DY) * 0.6));
+  const base = Math.min(HEX_HALF_WIDTH, HEX_THREE_QUARTER_HEIGHT);
+  const radius = Math.max(6, Math.round(base * 0.45));
   ctx.save();
   ctx.beginPath();
   ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
@@ -1507,7 +1406,7 @@ function renderWorld() {
 
   prepareCanvasFrame();
 
-  ctx.fillStyle = '#010101';
+  ctx.fillStyle = '#111111';
   ctx.fillRect(0, 0, canvasMetrics.width, canvasMetrics.height);
 
   ctx.save();
@@ -1731,11 +1630,7 @@ function pointerToCanvas(event) {
 
 function pixelToAxial(x, y) {
   const origin = getHexOrigin();
-  const px = x - origin.x;
-  const py = y - origin.y;
-
-  const q = 0.5 * (px / HEX_DX + py / HEX_DY);
-  const r = 0.5 * (py / HEX_DY - px / HEX_DX);
+  const { q, r } = canonicalPixelToAxial(x, y, origin);
   return hexRound(q, r);
 }
 
