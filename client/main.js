@@ -1110,6 +1110,8 @@ function drawMapBackground() {
   ctx.strokeStyle = '#000000';
   ctx.fillStyle = '#ffffff';
   ctx.lineWidth = 1;
+  ctx.lineJoin = 'miter';
+  ctx.lineCap = 'butt';
 
   const zoom = Math.max(mapView.zoom, 0.001);
   const tileRadius = Math.max(
@@ -1135,7 +1137,7 @@ function drawHexOverlay() {
 
   ctx.save();
   ctx.lineWidth = 1;
-  ctx.strokeStyle = 'rgba(80, 255, 120, 0.9)';
+  ctx.strokeStyle = 'rgb(54, 163, 67)';
   ctx.beginPath();
   const centers = layout.orderedTiles.map(({ centerX, centerY }) => ({
     center: { x: centerX, y: centerY },

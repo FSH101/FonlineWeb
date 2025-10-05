@@ -1,4 +1,4 @@
-export const HEX_W = 120;
+export const HEX_W = 84;
 export const HEX_H = HEX_W / 2;
 export const HALF_HEX_W = HEX_W / 2;
 export const HALF_HEX_H = HEX_H / 2;
@@ -17,10 +17,15 @@ export const AXIAL_R_VECTOR: Point = {
   y: THREE_QUARTER_HEX_H,
 };
 
-export const AXIAL_Q_MINUS_R_VECTOR: Point = {
-  x: AXIAL_Q_VECTOR.x - AXIAL_R_VECTOR.x,
-  y: AXIAL_Q_VECTOR.y - AXIAL_R_VECTOR.y,
-};
+const TILE_STEP_I = { q: 1, r: -2 };
+const TILE_STEP_J = { q: 2, r: 0 };
+
+const TILE_CORNER_AXIALS = [
+  { q: -2, r: 1 },
+  { q: -1, r: -1 },
+  { q: 1, r: -1 },
+  { q: 0, r: 1 },
+] as const;
 
 export interface CanvasMetrics {
   ctx: CanvasRenderingContext2D;
@@ -46,6 +51,13 @@ export function setupCanvas(canvas: HTMLCanvasElement): CanvasMetrics {
   return { ctx, cw: cssWidth, ch: cssHeight };
 }
 
+function roundPoint(point: Point): Point {
+  return {
+    x: Math.round(point.x),
+    y: Math.round(point.y),
+  };
+}
+
 export function hexPolygonPoints(cx: number, cy: number): Point[] {
   return [
     { x: Math.round(cx), y: Math.round(cy - HALF_HEX_H) },
@@ -57,7 +69,7 @@ export function hexPolygonPoints(cx: number, cy: number): Point[] {
   ];
 }
 
-export function tracePolygon(ctx: CanvasRenderingContext2D, pts: Point[]) {
+export function tracePolygon(ctx: CanvasRenderingContext2D, pts: Point[]): void {
   if (!pts.length) {
     return;
   }
@@ -68,37 +80,32 @@ export function tracePolygon(ctx: CanvasRenderingContext2D, pts: Point[]) {
   ctx.closePath();
 }
 
-export function fillPolygon(ctx: CanvasRenderingContext2D, pts: Point[]) {
+export function fillPolygon(ctx: CanvasRenderingContext2D, pts: Point[]): void {
   ctx.beginPath();
   tracePolygon(ctx, pts);
   ctx.fill();
 }
 
-export function strokePolygon(ctx: CanvasRenderingContext2D, pts: Point[]) {
+export function strokePolygon(ctx: CanvasRenderingContext2D, pts: Point[]): void {
   ctx.beginPath();
   tracePolygon(ctx, pts);
   ctx.stroke();
 }
 
-export function tileIndexToAxial(i: number, j: number): { q: number; r: number } {
-  const q = 2 * i + j;
-  const r = -4 * i;
-  return { q, r };
-}
-
-export function tileQuad(origin: Point, i: number, j: number): Point[] {
-  const { q, r } = tileIndexToAxial(i, j);
-  const v0 = axialToPixel(q, r, origin);
-  const v1 = axialToPixel(q + 2, r - 4, origin);
-  const v2 = axialToPixel(q + 3, r - 4, origin);
-  const v3 = axialToPixel(q + 1, r, origin);
-  return [v0, v1, v2, v3];
+export function tileQuad(origin: Point, i: number, j: number): [Point, Point, Point, Point] {
+  return TILE_CORNER_AXIALS.map(corner => {
+    const axial = {
+      q: corner.q + i * TILE_STEP_I.q + j * TILE_STEP_J.q,
+      r: corner.r + i * TILE_STEP_I.r + j * TILE_STEP_J.r,
+    };
+    return axialToPixel(axial.q, axial.r, origin);
+  }) as [Point, Point, Point, Point];
 }
 
 export function axialToPixel(q: number, r: number, origin: Point = { x: 0, y: 0 }): Point {
   const x = origin.x + q * AXIAL_Q_VECTOR.x + r * AXIAL_R_VECTOR.x;
   const y = origin.y + q * AXIAL_Q_VECTOR.y + r * AXIAL_R_VECTOR.y;
-  return { x: Math.round(x), y: Math.round(y) };
+  return roundPoint({ x, y });
 }
 
 export function pixelToAxial(x: number, y: number, origin: Point = { x: 0, y: 0 }) {
@@ -155,10 +162,12 @@ function renderAll(canvas: HTMLCanvasElement) {
   ctx.fillRect(0, 0, cw, ch);
 
   ctx.strokeStyle = '#000';
-  ctx.fillStyle = '#fff';
+  ctx.fillStyle = '#ffffff';
   ctx.lineWidth = 1;
+  ctx.lineJoin = 'miter';
+  ctx.lineCap = 'butt';
 
-  const tileRadius = 16;
+  const tileRadius = 18;
   const centerMap = new Map<string, { key: string; center: Point }>();
 
   for (let j = -tileRadius; j <= tileRadius; j += 1) {
@@ -177,7 +186,7 @@ function renderAll(canvas: HTMLCanvasElement) {
 
   const centers = Array.from(centerMap.values());
 
-  ctx.strokeStyle = '#0f0';
+  ctx.strokeStyle = 'rgb(54, 163, 67)';
   ctx.lineWidth = 1;
   ctx.beginPath();
   uniqueHexEdges(centers).forEach(({ a, b }) => {
@@ -212,8 +221,8 @@ function attachInteraction(canvas: HTMLCanvasElement) {
     const localX = Math.round(event.clientX - rect.left);
     const localY = Math.round(event.clientY - rect.top);
     const origin: Point = {
-      x: Math.round(metricsCache.cw / 2),
-      y: Math.round(metricsCache.ch / 2),
+      x: Math.round((metricsCache?.cw ?? 0) / 2),
+      y: Math.round((metricsCache?.ch ?? 0) / 2),
     };
 
     const axial = pixelToAxial(localX, localY, origin);

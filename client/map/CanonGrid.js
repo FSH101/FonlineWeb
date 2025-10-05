@@ -1,4 +1,4 @@
-export const HEX_W = 120;
+export const HEX_W = 84;
 export const HEX_H = HEX_W / 2;
 export const HALF_HEX_W = HEX_W / 2;
 export const HALF_HEX_H = HEX_H / 2;
@@ -15,10 +15,15 @@ export const AXIAL_R_VECTOR = {
   y: THREE_QUARTER_HEX_H,
 };
 
-export const AXIAL_Q_MINUS_R_VECTOR = {
-  x: AXIAL_Q_VECTOR.x - AXIAL_R_VECTOR.x,
-  y: AXIAL_Q_VECTOR.y - AXIAL_R_VECTOR.y,
-};
+const TILE_STEP_I = { q: 1, r: -2 };
+const TILE_STEP_J = { q: 2, r: 0 };
+
+const TILE_CORNER_AXIALS = [
+  { q: -2, r: 1 },
+  { q: -1, r: -1 },
+  { q: 1, r: -1 },
+  { q: 0, r: 1 },
+];
 
 export function setupCanvas(canvas) {
   const dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -36,6 +41,13 @@ export function setupCanvas(canvas) {
   ctx.lineJoin = 'miter';
   ctx.lineCap = 'butt';
   return { ctx, cw: cssWidth, ch: cssHeight };
+}
+
+function roundPoint(point) {
+  return {
+    x: Math.round(point.x),
+    y: Math.round(point.y),
+  };
 }
 
 export function hexPolygonPoints(cx, cy) {
@@ -72,25 +84,20 @@ export function strokePolygon(ctx, pts) {
   ctx.stroke();
 }
 
-export function tileIndexToAxial(i, j) {
-  const q = 2 * i + j;
-  const r = -4 * i;
-  return { q, r };
-}
-
 export function tileQuad(origin, i, j) {
-  const { q, r } = tileIndexToAxial(i, j);
-  const v0 = axialToPixel(q, r, origin);
-  const v1 = axialToPixel(q + 2, r - 4, origin);
-  const v2 = axialToPixel(q + 3, r - 4, origin);
-  const v3 = axialToPixel(q + 1, r, origin);
-  return [v0, v1, v2, v3];
+  return TILE_CORNER_AXIALS.map(corner => {
+    const axial = {
+      q: corner.q + i * TILE_STEP_I.q + j * TILE_STEP_J.q,
+      r: corner.r + i * TILE_STEP_I.r + j * TILE_STEP_J.r,
+    };
+    return axialToPixel(axial.q, axial.r, origin);
+  });
 }
 
 export function axialToPixel(q, r, origin = { x: 0, y: 0 }) {
   const x = origin.x + q * AXIAL_Q_VECTOR.x + r * AXIAL_R_VECTOR.x;
   const y = origin.y + q * AXIAL_Q_VECTOR.y + r * AXIAL_R_VECTOR.y;
-  return { x: Math.round(x), y: Math.round(y) };
+  return roundPoint({ x, y });
 }
 
 export function pixelToAxial(x, y, origin = { x: 0, y: 0 }) {
@@ -145,10 +152,12 @@ function renderAll(canvas) {
   ctx.fillRect(0, 0, cw, ch);
 
   ctx.strokeStyle = '#000';
-  ctx.fillStyle = '#fff';
+  ctx.fillStyle = '#ffffff';
   ctx.lineWidth = 1;
+  ctx.lineJoin = 'miter';
+  ctx.lineCap = 'butt';
 
-  const tileRadius = 16;
+  const tileRadius = 18;
   const centerMap = new Map();
 
   for (let j = -tileRadius; j <= tileRadius; j += 1) {
@@ -167,7 +176,7 @@ function renderAll(canvas) {
 
   const centers = Array.from(centerMap.values());
 
-  ctx.strokeStyle = '#0f0';
+  ctx.strokeStyle = 'rgb(54, 163, 67)';
   ctx.lineWidth = 1;
   ctx.beginPath();
   uniqueHexEdges(centers).forEach(({ a, b }) => {
