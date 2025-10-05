@@ -1,20 +1,22 @@
-name: FR (TLA assets_1/art) → GIF → ZIP (Release)
+name: External FR (TLA assets_1/art) → GIF (embedded JASC palette) → ZIP → Release
 
 on:
   workflow_dispatch: {}
-  # плюс автозапуск, когда в TLA-репо обновили ассеты — руками триггерни или оставь только dispatch
+  # Можно включить автозапуск по расписанию/при изменениях палитры:
+  # schedule:
+  #   - cron: "0 2 * * *"
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # нужно для gh release upload
+      contents: write
 
     steps:
       - name: Checkout THIS repo (FonlineWeb)
         uses: actions/checkout@v4
 
-      - name: Checkout EXTERNAL repo (FSH101/TLA3.0TG) sparse to assets_1/art
+      - name: Checkout EXTERNAL repo (FSH101/TLA3.0TG) — sparse assets_1/art
         uses: actions/checkout@v4
         with:
           repository: FSH101/TLA3.0TG
@@ -24,7 +26,7 @@ jobs:
           sparse-checkout: |
             assets_1/art
           sparse-checkout-cone: true
-          # Если TLA3.0TG станет приватным, добавь в секреты EXTERNAL_REPO_TOKEN и раскомментируй:
+          # Если внезапно приватный — добавь secret EXTERNAL_REPO_TOKEN и раскомментируй:
           # token: ${{ secrets.EXTERNAL_REPO_TOKEN }}
 
       - name: Install deps
@@ -33,7 +35,273 @@ jobs:
           pip install pillow
           sudo apt-get update && sudo apt-get install -y zip
 
-      - name: Write converter (FR → GIF, dirs named, asset_map)
+      - name: Write embedded JASC palette file
+        shell: bash
+        run: |
+          mkdir -p assets/palette
+          cat > assets/palette/fallout.jasc.pal << 'PAL'
+          JASC-PAL
+          0100
+          256
+          0 0 255
+          236 236 236
+          220 220 220
+          204 204 204
+          188 188 188
+          176 176 176
+          160 160 160
+          144 144 144
+          128 128 128
+          116 116 116
+          100 100 100
+          84 84 84
+          72 72 72
+          56 56 56
+          40 40 40
+          32 32 32
+          252 236 236
+          236 216 216
+          220 196 196
+          208 176 176
+          192 160 160
+          176 144 144
+          164 128 128
+          148 112 112
+          132 96 96
+          120 84 84
+          104 68 68
+          88 56 56
+          76 44 44
+          60 36 36
+          44 24 24
+          32 16 16
+          236 236 252
+          216 216 236
+          196 196 220
+          176 176 208
+          160 160 192
+          144 144 176
+          128 128 164
+          112 112 148
+          96 96 132
+          84 84 120
+          68 68 104
+          56 56 88
+          44 44 76
+          36 36 60
+          24 24 44
+          16 16 32
+          252 176 240
+          196 96 168
+          104 36 96
+          76 20 72
+          56 12 52
+          40 16 36
+          36 4 36
+          28 12 24
+          252 252 200
+          252 252 124
+          228 216 12
+          204 184 28
+          184 156 40
+          164 136 48
+          144 120 36
+          124 104 24
+          108 88 16
+          88 72 8
+          72 56 4
+          52 40 0
+          32 24 0
+          216 252 156
+          180 216 132
+          152 184 112
+          120 152 92
+          92 120 72
+          64 88 52
+          40 56 32
+          112 96 80
+          84 72 52
+          56 48 32
+          104 120 80
+          112 120 32
+          112 104 40
+          96 96 36
+          76 68 36
+          56 48 32
+          156 172 156
+          120 148 120
+          88 124 88
+          64 104 64
+          56 88 88
+          48 76 72
+          40 68 60
+          32 60 44
+          28 48 36
+          20 40 24
+          16 32 16
+          24 48 24
+          16 36 12
+          8 28 4
+          4 20 0
+          4 12 0
+          140 156 156
+          120 148 152
+          100 136 148
+          80 124 144
+          64 108 140
+          48 88 140
+          44 76 124
+          40 68 108
+          32 56 92
+          28 48 76
+          24 40 64
+          156 164 164
+          56 72 104
+          80 88 88
+          88 104 132
+          56 64 80
+          188 188 188
+          172 164 152
+          160 144 124
+          148 124 96
+          136 104 76
+          124 88 52
+          112 72 36
+          100 60 20
+          88 48 8
+          252 204 204
+          252 176 176
+          252 152 152
+          252 124 124
+          252 100 100
+          252 72 72
+          252 48 48
+          252 0 0
+          224 0 0
+          196 0 0
+          168 0 0
+          144 0 0
+          116 0 0
+          88 0 0
+          64 0 0
+          252 224 200
+          252 196 148
+          252 184 120
+          252 172 96
+          252 156 72
+          252 148 44
+          252 136 20
+          252 124 0
+          220 108 0
+          192 96 0
+          164 80 0
+          132 68 0
+          104 52 0
+          76 36 0
+          48 24 0
+          248 212 164
+          216 176 120
+          200 160 100
+          188 144 84
+          172 128 68
+          156 116 52
+          140 100 40
+          124 88 28
+          112 76 20
+          96 64 8
+          80 52 4
+          64 40 0
+          52 32 0
+          252 228 184
+          232 200 152
+          212 172 124
+          196 144 100
+          176 116 76
+          160 92 56
+          144 76 44
+          132 60 32
+          120 44 24
+          108 32 16
+          92 20 8
+          72 12 4
+          60 4 0
+          252 232 220
+          248 212 188
+          244 192 160
+          240 176 132
+          240 160 108
+          240 148 92
+          216 128 84
+          192 112 72
+          168 96 64
+          144 80 56
+          120 64 48
+          96 48 36
+          72 36 28
+          56 24 20
+          100 228 100
+          20 152 20
+          0 164 0
+          80 80 72
+          0 108 0
+          140 140 132
+          28 28 28
+          104 80 56
+          48 40 32
+          140 112 96
+          72 56 40
+          12 12 12
+          60 60 60
+          108 116 108
+          120 132 120
+          136 148 136
+          148 164 148
+          88 104 96
+          96 112 104
+          60 248 0
+          56 212 8
+          52 180 16
+          48 148 20
+          40 116 24
+          252 252 252
+          240 236 208
+          208 184 136
+          152 124 80
+          104 88 60
+          80 64 36
+          52 40 28
+          24 16 12
+          0 0 0
+          0 108 0
+          11 115 7
+          27 123 15
+          43 131 27
+          107 107 111
+          99 103 127
+          87 107 143
+          0 147 163
+          107 187 255
+          255 0 0
+          215 0 0
+          147 43 11
+          255 119 0
+          255 59 0
+          71 0 0
+          123 0 0
+          179 0 0
+          123 0 0
+          71 0 0
+          83 63 43
+          75 59 43
+          67 55 39
+          63 51 39
+          55 47 35
+          51 43 35
+          252 0 0
+          255 255 255
+          PAL
+
+      - name: Write converter (FR → GIF using JASC/ColorPal/GPL palette)
         shell: bash
         run: |
           cat > fr_to_gif.py << 'PY'
@@ -43,18 +311,81 @@ jobs:
           from pathlib import Path
           from PIL import Image
 
-          # --- Палитра: индекс 0 = прозрачный. (Можно вставить «настоящую» Fallout-палитру позже.)
-          def _fallback_palette():
-              return [(0,0,0)] + [(i,i,i) for i in range(1,256)]
-          PALETTE = _fallback_palette()
+          # ---------- Palette loaders ----------
+          def load_color_pal_bin(path: Path):
+              b = path.read_bytes()
+              if len(b) != 256*3:
+                  raise ValueError("color.pal must be exactly 768 bytes")
+              cols = [(b[i], b[i+1], b[i+2]) for i in range(0, 768, 3)]
+              cols[0] = (0,0,0)
+              return cols
 
+          def load_gimp_gpl(path: Path):
+              cols=[]
+              for ln in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                  s = ln.strip()
+                  if not s or s.startswith("#") or s.lower().startswith(("gimp palette","name","columns")):
+                      continue
+                  parts = s.split()
+                  try:
+                      r,g,b = int(parts[0]), int(parts[1]), int(parts[2])
+                  except Exception:
+                      continue
+                  r = max(0,min(255,r)); g = max(0,min(255,g)); b = max(0,min(255,b))
+                  cols.append((r,g,b))
+              if len(cols) < 256:
+                  cols += [(i,i,i) for i in range(len(cols),256)]
+              cols[0] = (0,0,0)
+              return cols[:256]
+
+          def load_jasc_pal(path: Path):
+              lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+              # Expect header:
+              # JASC-PAL
+              # 0100
+              # 256
+              # r g b ...
+              if len(lines) < 4 or not lines[0].strip().upper().startswith("JASC-PAL"):
+                  raise ValueError("Not a JASC-PAL file")
+              try:
+                  count = int(lines[2].strip())
+              except:
+                  count = 256
+              cols=[]
+              for s in lines[3:3+count]:
+                  parts = s.strip().split()
+                  if len(parts) < 3: 
+                      continue
+                  try:
+                      r,g,b = int(parts[0]), int(parts[1]), int(parts[2])
+                  except:
+                      continue
+                  cols.append((max(0,min(255,r)), max(0,min(255,g)), max(0,min(255,b))))
+              if len(cols) < 256:
+                  cols += [(i,i,i) for i in range(len(cols),256)]
+              cols[0] = (0,0,0)
+              return cols[:256]
+
+          def resolve_palette():
+              p_bin = Path("assets/palette/color.pal")
+              p_gpl = Path("assets/palette/fallout.gpl")
+              p_jasc= Path("assets/palette/fallout.jasc.pal")
+              if p_bin.exists(): return load_color_pal_bin(p_bin)
+              if p_gpl.exists(): return load_gimp_gpl(p_gpl)
+              if p_jasc.exists(): return load_jasc_pal(p_jasc)
+              raise SystemExit("Palette not found")
+          PALETTE = resolve_palette()
+
+          # ---------- FR parser ----------
           def be_u16(b,o): return struct.unpack_from(">H",b,o)[0]
           def be_s16(b,o): return struct.unpack_from(">h",b,o)[0]
           def be_u32(b,o): return struct.unpack_from(">I",b,o)[0]
 
           def parse_fr_bytes(data: bytes):
-              # Простая схема, которую мы уже использовали в твоих экшнах.
-              version=be_u32(data,0x00); fps=be_u16(data,0x04); action=be_u16(data,0x06); fpd=be_u16(data,0x08)
+              version=be_u32(data,0x00)
+              fps=be_u16(data,0x04)
+              action=be_u16(data,0x06)
+              fpd=be_u16(data,0x08)
               shiftX=[be_s16(data,0x0A+i*2) for i in range(6)]
               shiftY=[be_s16(data,0x16+i*2) for i in range(6)]
               dirOff=[be_u32(data,0x22+i*4) for i in range(6)]
@@ -62,12 +393,17 @@ jobs:
               dirs=[]; maxW=maxH=0
               for d in range(6):
                   off=base+dirOff[d]; cur=off; frames=[]
+                  if off<=0 or off>=len(data):
+                      dirs.append([]); continue
                   for _ in range(fpd):
                       if cur+12 > len(data): break
                       w=be_u16(data,cur); h=be_u16(data,cur+2); sz=be_u32(data,cur+4)
                       xo=be_s16(data,cur+8); yo=be_s16(data,cur+10)
                       if cur+12+sz > len(data): break
                       raw=data[cur+12:cur+12+sz]
+                      if len(raw) < w*h:
+                          raw = raw + bytes(w*h-len(raw))
+                      raw = raw[:w*h]
                       frames.append({"w":w,"h":h,"xOff":xo,"yOff":yo,"idx":raw})
                       maxW=max(maxW,w); maxH=max(maxH,h)
                       cur+=12+sz
@@ -84,7 +420,8 @@ jobs:
               for y in range(h):
                   for x in range(w):
                       idx = raw[i]; i+=1
-                      if idx==0: px[x,y]=(0,0,0,0)
+                      if idx==0:
+                          px[x,y]=(0,0,0,0)
                       else:
                           r,g,b = PALETTE[idx]
                           px[x,y]=(r,g,b,255)
@@ -102,7 +439,7 @@ jobs:
                   return "object","decor"
               return "unknown","unknown"
 
-          DIR_LABELS = ["S","SW","W","NW","NE","E"]  # fallout order
+          DIR_LABELS = ["S","SW","W","NW","NE","E"]
 
           def save_gif(frames_rgba, out_path: Path, fps: int):
               mw = max(im.width for im in frames_rgba) if frames_rgba else 1
@@ -110,8 +447,7 @@ jobs:
               seq=[]
               for im in frames_rgba:
                   canvas = Image.new("RGBA",(mw,mh),(0,0,0,0))
-                  # выравниваем по низу (как удобно для изометрии)
-                  canvas.paste(im, ((mw-im.width)//2, mh-im.height))
+                  canvas.paste(im, ((mw-im.width)//2, mh-im.height))  # якорь по низу
                   seq.append(canvas.convert("P", palette=Image.ADAPTIVE, colors=255))
               dur = max(1,int(1000/max(1, fps or 10)))
               if len(seq)<=1:
@@ -121,7 +457,7 @@ jobs:
                               duration=dur, optimize=True, transparency=0, disposal=2)
 
           def main():
-              src = Path("ext_repo/assets_1/art")  # ЖЁСТКО: внешний путь
+              src = Path("ext_repo/assets_1/art")
               out = Path("build/gif"); out.mkdir(parents=True, exist_ok=True)
               exts = (".frm",".fr0",".fr1",".fr2",".fr3",".fr4",".fr5",".FRM",".FR0",".FR1",".FR2",".FR3",".FR4",".FR5")
               files = sorted([p for p in src.rglob("*") if p.suffix in exts], key=lambda p:p.as_posix())
@@ -140,7 +476,6 @@ jobs:
 
                   for d_idx, frames in enumerate(parsed["directions"]):
                       if not frames: continue
-                      ddir = None
                       if kind=="critter":
                           label = DIR_LABELS[d_idx] if d_idx < len(DIR_LABELS) else f"DIR{d_idx}"
                           ddir = base / f"dir_{label}"
@@ -170,7 +505,7 @@ jobs:
           PY
           chmod +x fr_to_gif.py
 
-      - name: Convert FR → GIF
+      - name: Convert FR → GIF (with embedded palette)
         run: |
           mkdir -p build/gif
           python fr_to_gif.py
@@ -181,17 +516,17 @@ jobs:
           zip -r "fr_gifs_pack.zip" gif
           ls -lah fr_gifs_pack.zip gif/asset_map.json
 
-      - name: Create/Upload Release in THIS repo
+      - name: Create/Upload Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
           TAG="fr-gifs-$(date +%Y%m%d-%H%M%S)"
-          gh release create "$TAG" -t "$TAG" -n "FR → GIF pack from TLA3.0TG assets_1/art" || true
+          gh release create "$TAG" -t "$TAG" -n "FR → GIF (with embedded JASC palette) from TLA assets_1/art" || true
           gh release upload "$TAG" "build/fr_gifs_pack.zip" --clobber
           gh release upload "$TAG" "build/gif/asset_map.json" --clobber
 
-      - name: Upload artifact (for CI download)
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: fr_gifs_pack
