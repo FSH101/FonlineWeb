@@ -73,16 +73,16 @@ export function strokePolygon(ctx, pts) {
 }
 
 export function tileIndexToAxial(i, j) {
-  const q = i + j;
-  const r = -2 * i;
+  const q = 2 * i + j;
+  const r = -4 * i;
   return { q, r };
 }
 
 export function tileQuad(origin, i, j) {
   const { q, r } = tileIndexToAxial(i, j);
   const v0 = axialToPixel(q, r, origin);
-  const v1 = axialToPixel(q + 1, r - 2, origin);
-  const v2 = axialToPixel(q + 2, r - 2, origin);
+  const v1 = axialToPixel(q + 2, r - 4, origin);
+  const v2 = axialToPixel(q + 3, r - 4, origin);
   const v3 = axialToPixel(q + 1, r, origin);
   return [v0, v1, v2, v3];
 }
