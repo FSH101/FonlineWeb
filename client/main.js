@@ -36,12 +36,12 @@ function clamp(value, min, max) {
 }
 
 const DIRECTION_VECTORS = {
-  southEast: { q: 0, r: 1 },
-  east: { q: 1, r: 0 },
-  northEast: { q: 1, r: -1 },
-  northWest: { q: 0, r: -1 },
-  west: { q: -1, r: 0 },
-  southWest: { q: -1, r: 1 },
+  southEast: { q: 1, r: 0 },
+  east: { q: 1, r: -1 },
+  northEast: { q: 0, r: -1 },
+  northWest: { q: -1, r: 0 },
+  west: { q: -1, r: 1 },
+  southWest: { q: 0, r: 1 },
 };
 
 const DIRECTION_METADATA = Object.entries(DIRECTION_VECTORS).map(([name, vector]) => {
