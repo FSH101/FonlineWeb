@@ -954,13 +954,25 @@ function renderCritterList(options = {}) {
     critterListEl.scrollTop = 0;
   }
 
-  critterListEl.disabled = critters.length === 0;
+  const isEmpty = critters.length === 0;
+
+  critterListEl.disabled = isEmpty;
   if (critterListEl.disabled) {
     critterListEl.selectedIndex = -1;
   }
 
   if (critterEmptyMessageEl) {
-    critterEmptyMessageEl.hidden = critters.length > 0;
+    critterEmptyMessageEl.hidden = !isEmpty;
+    critterEmptyMessageEl.setAttribute('aria-hidden', String(!isEmpty));
+    if (isEmpty) {
+      critterEmptyMessageEl.style.display = 'grid';
+    } else {
+      critterEmptyMessageEl.style.display = 'none';
+    }
+  }
+
+  if (critterListEl) {
+    critterListEl.setAttribute('aria-hidden', String(isEmpty));
   }
 
   updateResultCount(critters.length);

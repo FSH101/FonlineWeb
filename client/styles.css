@@ -711,6 +711,7 @@ body.is-mobile .critter-selector {
   padding: 1rem;
   font-size: 0.85rem;
   color: var(--text-secondary);
+  pointer-events: none;
 }
 
 .critter-selector__status {
