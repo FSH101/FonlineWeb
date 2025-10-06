@@ -35,7 +35,59 @@
           <section class="command-bar panel" id="commandBar" aria-label="Панель действий">
             <header class="panel__title">Действия</header>
             <div class="command-bar__grid" data-role="command-buttons"></div>
-         </section>
+          </section>
+          <section
+            class="critter-selector panel"
+            id="critterSelector"
+            aria-label="Выбор персонажа"
+          >
+            <header class="panel__title">Персонажи</header>
+            <div class="critter-selector__filters">
+              <label class="critter-selector__search" for="critterSearch">
+                <span class="visually-hidden">Поиск персонажа</span>
+                <input
+                  type="search"
+                  id="critterSearch"
+                  placeholder="Поиск по названию или коду"
+                  autocomplete="off"
+                  spellcheck="false"
+                  enterkeyhint="search"
+                />
+              </label>
+              <label class="critter-selector__type" for="critterTypeFilter">
+                <span class="visually-hidden">Тип персонажа</span>
+                <select id="critterTypeFilter"></select>
+              </label>
+              <label class="critter-selector__group" for="critterGroupSelect">
+                <span class="critter-selector__label">Анимация</span>
+                <select id="critterGroupSelect"></select>
+              </label>
+              <div class="critter-selector__stage-grid">
+                <label class="critter-selector__stage" for="critterIdleStage">
+                  <span class="critter-selector__label">Покой</span>
+                  <select id="critterIdleStage"></select>
+                </label>
+                <label class="critter-selector__stage" for="critterMoveStage">
+                  <span class="critter-selector__label">Движение</span>
+                  <select id="critterMoveStage"></select>
+                </label>
+              </div>
+            </div>
+            <div class="critter-selector__meta">
+              <span id="critterResultCount" class="critter-selector__count" aria-live="polite"
+                >—</span
+              >
+            </div>
+            <div class="critter-selector__list-wrapper">
+              <ul class="critter-selector__list" id="critterList" role="listbox"></ul>
+              <div class="critter-selector__empty" id="critterEmptyMessage" hidden>
+                Ничего не найдено. Попробуйте изменить фильтры или запрос.
+              </div>
+            </div>
+            <footer class="critter-selector__status" id="critterStatus" data-variant="info">
+              Выберите персонажа из списка, чтобы загрузить его анимации.
+            </footer>
+          </section>
           <section class="chat panel" aria-label="Чат">
             <header class="panel__title">Чат</header>
             <ul class="chat__log" id="chatLog" aria-live="polite"></ul>

@@ -18,8 +18,16 @@ const FEMALE_LOCAL_BASES = [
 const CRITTER_LOCAL_BASES = [
   'player/assets/critters',
   '/player/assets/critters',
+  'player/assets/critters/gif',
+  '/player/assets/critters/gif',
   'client/player/assets/critters',
   '/client/player/assets/critters',
+  'client/player/assets/critters/gif',
+  '/client/player/assets/critters/gif',
+  'assets/critters',
+  '/assets/critters',
+  'assets/critters/gif',
+  '/assets/critters/gif',
 ];
 
 const GIF_DIRECTION_SUFFIX = {
@@ -98,9 +106,16 @@ function buildImageSequenceManifest(folder, options = {}) {
 function collectGifBaseUrls(basePath, extraBaseUrls = []) {
   const normalizedBasePath = normalizeKey(basePath).replace(/\/+$/, '');
   const folderlessBase = normalizedBasePath.replace(/\/[^/]+$/, '');
+
+  const uppercaseBase = normalizedBasePath.toUpperCase();
+  const uppercaseFolderless = folderlessBase.toUpperCase();
+
   const candidates = [
     ...extraBaseUrls,
+    normalizedBasePath,
     folderlessBase,
+    uppercaseBase,
+    uppercaseFolderless,
     ...CRITTER_LOCAL_BASES,
   ];
 
@@ -262,21 +277,98 @@ registerDynamicManifestResolver(basePath => {
     return null;
   }
 
-  const critterMatch = /(?:^|\/)player\/assets\/critters\/([^/]+)$/i.exec(basePath)
-    || /(?:^|\/)client\/player\/assets\/critters\/([^/]+)$/i.exec(basePath)
-    || /(?:^|\/)assets\/critters\/([^/]+)$/i.exec(basePath);
-
-  if (!critterMatch) {
+  const normalizedBase = normalizeKey(basePath);
+  if (!normalizedBase) {
     return null;
   }
 
-  const [ , prefix ] = critterMatch;
-  if (!prefix) {
+  const critterRootMatch = /(?:^|\/)player\/assets\/critters\/(.+)$/i.exec(normalizedBase)
+    || /(?:^|\/)client\/player\/assets\/critters\/(.+)$/i.exec(normalizedBase)
+    || /(?:^|\/)assets\/critters\/(.+)$/i.exec(normalizedBase);
+
+  if (!critterRootMatch) {
     return null;
   }
 
-  return buildGifManifest(prefix, {
-    basePath,
+  const suffixPath = critterRootMatch[1] ?? '';
+  const segments = suffixPath.split('/').filter(Boolean);
+  if (segments.length === 0) {
+    return null;
+  }
+
+  const lastSegment = segments[segments.length - 1];
+  const penultimateSegment = segments.length > 1 ? segments[segments.length - 2] : null;
+
+  let critterKey = null;
+  let animationSegment = null;
+  let explicitPrefix = null;
+
+  const trailingMatch = /^([a-z0-9_]+?)([a-z0-9]{2})$/i.exec(lastSegment);
+  if (trailingMatch) {
+    critterKey = trailingMatch[1];
+    animationSegment = trailingMatch[2];
+    explicitPrefix = trailingMatch[0];
+  }
+
+  if (penultimateSegment && penultimateSegment.toLowerCase() !== 'gif') {
+    critterKey = critterKey ?? penultimateSegment;
+  }
+
+  if (/^[a-z0-9]{2}$/i.test(lastSegment)) {
+    animationSegment = lastSegment;
+    if (critterKey) {
+      explicitPrefix = `${critterKey}${animationSegment}`;
+    }
+  }
+
+  if (!critterKey) {
+    critterKey = trailingMatch ? trailingMatch[1] : lastSegment;
+  }
+
+  if (!animationSegment) {
+    animationSegment = 'AA';
+  }
+
+  if (!explicitPrefix && critterKey) {
+    explicitPrefix = `${critterKey}${animationSegment}`;
+  }
+
+  if (!explicitPrefix) {
+    return null;
+  }
+
+  const parentBase = normalizedBase.replace(/\/+$/, '').replace(/\/[^/]+$/, '');
+  const sanitizedCritter = critterKey.replace(/[^a-z0-9_]/gi, '');
+  const extraBaseUrls = [];
+
+  if (sanitizedCritter) {
+    const lower = sanitizedCritter.toLowerCase();
+    const upper = sanitizedCritter.toUpperCase();
+
+    if (parentBase && parentBase !== normalizedBase) {
+      extraBaseUrls.push(`${parentBase}/${lower}`);
+      extraBaseUrls.push(`${parentBase}/${upper}`);
+      extraBaseUrls.push(`${parentBase}/${lower}/gif`);
+      extraBaseUrls.push(`${parentBase}/${upper}/gif`);
+    }
+
+    extraBaseUrls.push(`player/assets/critters/${lower}`);
+    extraBaseUrls.push(`/player/assets/critters/${lower}`);
+    extraBaseUrls.push(`client/player/assets/critters/${lower}`);
+    extraBaseUrls.push(`/client/player/assets/critters/${lower}`);
+    extraBaseUrls.push(`assets/critters/${lower}`);
+    extraBaseUrls.push(`/assets/critters/${lower}`);
+    extraBaseUrls.push(`player/assets/critters/${upper}`);
+    extraBaseUrls.push(`/player/assets/critters/${upper}`);
+    extraBaseUrls.push(`client/player/assets/critters/${upper}`);
+    extraBaseUrls.push(`/client/player/assets/critters/${upper}`);
+    extraBaseUrls.push(`assets/critters/${upper}`);
+    extraBaseUrls.push(`/assets/critters/${upper}`);
+  }
+
+  return buildGifManifest(explicitPrefix, {
+    basePath: normalizedBase,
     includeBasePath: false,
+    baseUrls: extraBaseUrls,
   });
 });

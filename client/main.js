@@ -1,5 +1,20 @@
 import { loadUiConfig } from './ui/configLoader.js';
 import { tryLoadAnimation } from './player/heroSprite.js';
+import {
+  critterCatalog,
+  listCritterTypes,
+  formatCritterDisplayName,
+  getCritterByCode,
+  getCritterPrimaryGroups,
+  getDefaultCritterGroup,
+  buildCritterAnimationCode,
+  buildCritterAnimationPath,
+  parseCritterAnimationPath,
+  CRITTER_STAGE_SUFFIX,
+  PRIMARY_ANIMATION_GROUPS,
+  normalizeCritterCode,
+  getPrimaryAnimationMetadata,
+} from './player/assets/critterCatalog.js';
 import { loadMapDefinition, createTileTextureCache } from './map/mapData.js';
 import {
   HEX_W,
@@ -74,6 +89,17 @@ const commandBarTitleEl = commandBarEl?.querySelector('.panel__title') ?? null;
 const hudTitleEl = document.querySelector('.hud-top__title');
 const chatTitleEl = document.querySelector('.chat .panel__title');
 const overlayLayerEl = document.getElementById('overlayLayer');
+
+const critterSelectorEl = document.getElementById('critterSelector');
+const critterSearchInput = document.getElementById('critterSearch');
+const critterTypeFilter = document.getElementById('critterTypeFilter');
+const critterGroupSelect = document.getElementById('critterGroupSelect');
+const critterIdleStageSelect = document.getElementById('critterIdleStage');
+const critterMoveStageSelect = document.getElementById('critterMoveStage');
+const critterListEl = document.getElementById('critterList');
+const critterEmptyMessageEl = document.getElementById('critterEmptyMessage');
+const critterStatusEl = document.getElementById('critterStatus');
+const critterResultCountEl = document.getElementById('critterResultCount');
 
 const coarsePointerMedia = window.matchMedia('(hover: none) and (pointer: coarse)');
 
@@ -244,10 +270,26 @@ function applyDirectionOrderFromAnimation(animation) {
   }
 }
 
+function ensureDefaultFacingIsValid() {
+  if (!Array.isArray(playerSettings.directionOrder) || playerSettings.directionOrder.length === 0) {
+    playerSettings.directionOrder = [...DEFAULT_PLAYER_SETTINGS.directionOrder];
+  }
+  if (!playerSettings.directionOrder.includes(playerSettings.defaultFacing)) {
+    playerSettings.defaultFacing =
+      playerSettings.directionOrder[0] ?? DEFAULT_PLAYER_SETTINGS.defaultFacing;
+  }
+}
+
 const playerVisuals = new Map();
 
 let animationFrameHandle = null;
 let lastFrameTime = null;
+
+function syncPlayerVisualMoveDurations() {
+  for (const visual of playerVisuals.values()) {
+    visual.moveDuration = playerSettings.moveDuration;
+  }
+}
 
 function deepClone(value) {
   if (Array.isArray(value)) {
@@ -362,6 +404,8 @@ async function loadPlayerAnimationsFromSettings() {
   } else if (playerAnimations.idle) {
     applyDirectionOrderFromAnimation(playerAnimations.idle);
   }
+
+  ensureDefaultFacingIsValid();
 }
 
 function parseList(value) {
@@ -745,6 +789,658 @@ function buildOverlays(config) {
   });
 }
 
+const CRITTER_STAGE_LABELS = {
+  idle: 'Покой',
+  walk: 'Шаг',
+  run: 'Бег',
+};
+
+const STAGE_ENTRIES = Object.entries(CRITTER_STAGE_SUFFIX);
+const STAGE_SUFFIX_TO_KEY = STAGE_ENTRIES.reduce((acc, [key, suffix]) => {
+  acc[String(suffix).toUpperCase()] = key;
+  return acc;
+}, {});
+
+const GROUP_METADATA_SORTED = Object.values(PRIMARY_ANIMATION_GROUPS).sort(
+  (left, right) => (left.order ?? 0) - (right.order ?? 0) || left.id.localeCompare(right.id)
+);
+const GROUP_IDS_SORTED = GROUP_METADATA_SORTED.map(meta => meta.id);
+
+const numberFormatter = (() => {
+  try {
+    return new Intl.NumberFormat('ru-RU');
+  } catch (error) {
+    return { format: value => String(value) };
+  }
+})();
+
+const totalCritterCount = critterCatalog.length;
+const DEFAULT_CRITTER_STATUS_MESSAGE =
+  'Выберите персонажа из списка, чтобы загрузить его анимации.';
+
+const critterSelectorState = {
+  searchTerm: '',
+  typeFilter: 'all',
+  group: GROUP_IDS_SORTED[0] ?? 'A',
+  idleStage: 'idle',
+  moveStage: 'run',
+  highlightedCode: null,
+  activeCritter: null,
+  activeSelection: null,
+  loadToken: 0,
+};
+
+function normalizeStageKey(stage, fallback = 'idle') {
+  if (!stage) {
+    return fallback;
+  }
+  if (CRITTER_STAGE_SUFFIX[stage]) {
+    return stage;
+  }
+  const normalized = STAGE_SUFFIX_TO_KEY[String(stage).toUpperCase()];
+  return normalized ?? fallback;
+}
+
+function updateCritterStatus(message, variant = 'info') {
+  if (!critterStatusEl) {
+    return;
+  }
+  const nextMessage = message ?? DEFAULT_CRITTER_STATUS_MESSAGE;
+  critterStatusEl.textContent = nextMessage;
+  critterStatusEl.dataset.variant = variant;
+}
+
+function updateResultCount(count) {
+  if (!critterResultCountEl) {
+    return;
+  }
+  const formattedCount = numberFormatter.format(count);
+  const formattedTotal = numberFormatter.format(totalCritterCount);
+  critterResultCountEl.textContent = `Найдено: ${formattedCount} из ${formattedTotal}`;
+}
+
+function filterCritters() {
+  const tokens = critterSelectorState.searchTerm
+    .split(/\s+/)
+    .map(token => token.trim().toLowerCase())
+    .filter(Boolean);
+
+  const selectedTypeValue = critterSelectorState.typeFilter;
+  const selectedType = selectedTypeValue === 'all' ? null : Number(selectedTypeValue);
+  const shouldFilterByType = selectedType !== null && Number.isFinite(selectedType);
+
+  return critterCatalog.filter(critter => {
+    if (shouldFilterByType && critter.type !== selectedType) {
+      return false;
+    }
+
+    if (tokens.length === 0) {
+      return true;
+    }
+
+    const haystack = [
+      critter.displayName?.toLowerCase() ?? '',
+      ...(critter.searchTokens ?? []).map(token => token.toLowerCase()),
+    ];
+
+    return tokens.every(token => haystack.some(entry => entry.includes(token)));
+  });
+}
+
+function updateHighlight(scrollIntoView = false) {
+  if (!critterListEl) {
+    return null;
+  }
+
+  const desiredCode =
+    critterSelectorState.highlightedCode ??
+    critterSelectorState.activeSelection?.codeLower ??
+    null;
+
+  let selectedButton = null;
+  const options = critterListEl.querySelectorAll('[data-role="critter-option"]');
+
+  options.forEach(option => {
+    if (option.dataset.code === desiredCode) {
+      option.classList.add('is-selected');
+      option.setAttribute('aria-selected', 'true');
+      selectedButton = option;
+    } else {
+      option.classList.remove('is-selected');
+      option.setAttribute('aria-selected', 'false');
+    }
+  });
+
+  if (selectedButton) {
+    critterListEl.setAttribute('aria-activedescendant', selectedButton.id);
+    if (scrollIntoView) {
+      selectedButton.scrollIntoView({ block: 'nearest' });
+    }
+  } else {
+    critterListEl.removeAttribute('aria-activedescendant');
+  }
+
+  return selectedButton;
+}
+
+function renderCritterList(options = {}) {
+  if (!critterListEl) {
+    return;
+  }
+
+  const { resetScroll = false } = options;
+  const critters = filterCritters();
+
+  critterListEl.innerHTML = '';
+  const fragment = document.createDocumentFragment();
+
+  for (const critter of critters) {
+    const listItem = document.createElement('li');
+    listItem.setAttribute('role', 'presentation');
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'critter-selector__item';
+    button.dataset.role = 'critter-option';
+    button.dataset.code = critter.codeLower;
+    button.id = `critter-option-${critter.codeLower}`;
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-selected', 'false');
+    button.title = formatCritterDisplayName(critter);
+
+    const codeSpan = document.createElement('span');
+    codeSpan.className = 'critter-selector__item-code';
+    codeSpan.textContent = critter.codeUpper ?? critter.code.toUpperCase();
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'critter-selector__item-name';
+    nameSpan.textContent = formatCritterDisplayName(critter);
+
+    const typeSpan = document.createElement('span');
+    typeSpan.className = 'critter-selector__item-type';
+    typeSpan.textContent = critter.typeLabel ?? '';
+
+    button.append(codeSpan, nameSpan, typeSpan);
+    listItem.appendChild(button);
+    fragment.appendChild(listItem);
+  }
+
+  critterListEl.appendChild(fragment);
+
+  if (resetScroll) {
+    critterListEl.scrollTop = 0;
+  }
+
+  if (critterEmptyMessageEl) {
+    critterEmptyMessageEl.hidden = critters.length > 0;
+  }
+
+  updateResultCount(critters.length);
+  updateHighlight(false);
+}
+
+function updateGroupOptionState(critter, desiredGroup) {
+  if (!critterGroupSelect) {
+    critterSelectorState.group = desiredGroup;
+    return desiredGroup;
+  }
+
+  const availableGroups = critter ? new Set(getCritterPrimaryGroups(critter)) : null;
+
+  Array.from(critterGroupSelect.options).forEach(option => {
+    if (!option.value) {
+      return;
+    }
+    option.disabled = availableGroups ? !availableGroups.has(option.value) : false;
+  });
+
+  let resolvedGroup = desiredGroup;
+
+  if (availableGroups && availableGroups.size > 0) {
+    if (!availableGroups.has(resolvedGroup)) {
+      const fallbackGroup = getDefaultCritterGroup(critter);
+      resolvedGroup = availableGroups.has(fallbackGroup)
+        ? fallbackGroup
+        : Array.from(availableGroups)[0];
+    }
+  }
+
+  if (
+    !resolvedGroup ||
+    !critterGroupSelect.querySelector(`option[value="${resolvedGroup}"]`)
+  ) {
+    critterGroupSelect.selectedIndex = 0;
+    resolvedGroup = critterGroupSelect.value || GROUP_IDS_SORTED[0] || 'A';
+  } else {
+    critterGroupSelect.value = resolvedGroup;
+  }
+
+  critterSelectorState.group = resolvedGroup;
+  return resolvedGroup;
+}
+
+function refreshStageSelectOptions() {
+  if (!critterIdleStageSelect || !critterMoveStageSelect) {
+    return;
+  }
+
+  const populate = (select, selectedValue, fallback) => {
+    select.innerHTML = '';
+    for (const [stageKey] of STAGE_ENTRIES) {
+      const option = document.createElement('option');
+      option.value = stageKey;
+      const label = CRITTER_STAGE_LABELS[stageKey] ?? stageKey;
+      option.textContent = `${buildCritterAnimationCode(critterSelectorState.group, stageKey)} — ${label}`;
+      select.appendChild(option);
+    }
+    const hasSelected = STAGE_ENTRIES.some(([stageKey]) => stageKey === selectedValue);
+    const valueToUse = hasSelected ? selectedValue : fallback;
+    select.value = valueToUse;
+    return valueToUse;
+  };
+
+  const idleValue = populate(
+    critterIdleStageSelect,
+    normalizeStageKey(critterSelectorState.idleStage, 'idle'),
+    'idle'
+  );
+  const moveValue = populate(
+    critterMoveStageSelect,
+    normalizeStageKey(critterSelectorState.moveStage, 'run'),
+    'run'
+  );
+
+  critterSelectorState.idleStage = idleValue;
+  critterSelectorState.moveStage = moveValue;
+}
+
+function resolveGroupForCritter(critter) {
+  if (!critter) {
+    return critterSelectorState.group;
+  }
+  const available = getCritterPrimaryGroups(critter);
+  if (!available || available.length === 0) {
+    return critterSelectorState.group;
+  }
+  if (available.includes(critterSelectorState.group)) {
+    return critterSelectorState.group;
+  }
+  const fallback = getDefaultCritterGroup(critter);
+  return available.includes(fallback) ? fallback : available[0];
+}
+
+function resolveMoveDurationForCritter(critter, fallbackDuration = playerSettings.moveDuration) {
+  const safeFallback =
+    Number.isFinite(fallbackDuration) && fallbackDuration > 0
+      ? fallbackDuration
+      : DEFAULT_PLAYER_SETTINGS.moveDuration;
+
+  if (Number.isFinite(critter?.runMs) && critter.runMs > 0) {
+    return critter.runMs;
+  }
+  if (Number.isFinite(critter?.walkMs) && critter.walkMs > 0) {
+    return critter.walkMs;
+  }
+  return safeFallback;
+}
+
+function formatSuccessMessage(critter, group, idleStageKey, moveStageKey, moveDuration, options = {}) {
+  const groupMeta = getPrimaryAnimationMetadata(group);
+  const groupLabel = groupMeta ? `${group} — ${groupMeta.label}` : `Группа ${group}`;
+  const idleCode = buildCritterAnimationCode(group, idleStageKey);
+  const moveCode = buildCritterAnimationCode(group, moveStageKey);
+  const formattedDuration = numberFormatter.format(Math.round(moveDuration));
+  let message = `${formatCritterDisplayName(critter)}: ${groupLabel}. Покой — ${idleCode}, Движение — ${moveCode}. Скорость: ${formattedDuration} мс.`;
+  if (options.groupFallback) {
+    message += ' Выбранная группа недоступна, применено значение по умолчанию.';
+  }
+  return message;
+}
+
+async function applyCritterSelection(critter, options = {}) {
+  if (!critter) {
+    return;
+  }
+
+  const previousSelection = critterSelectorState.activeSelection;
+  const previousHighlight =
+    options.previousHighlight ?? previousSelection?.codeLower ?? null;
+
+  const idleStageKey = normalizeStageKey(critterSelectorState.idleStage, 'idle');
+  const moveStageKey = normalizeStageKey(critterSelectorState.moveStage, 'run');
+  critterSelectorState.idleStage = idleStageKey;
+  critterSelectorState.moveStage = moveStageKey;
+
+  const groupToUse = resolveGroupForCritter(critter);
+  const fallbackUsed = groupToUse !== critterSelectorState.group;
+
+  if (
+    previousSelection &&
+    previousSelection.codeLower === critter.codeLower &&
+    previousSelection.group === groupToUse &&
+    previousSelection.idleStage === idleStageKey &&
+    previousSelection.moveStage === moveStageKey
+  ) {
+    updateHighlight(true);
+    if (!options.silent) {
+      const duration = resolveMoveDurationForCritter(critter);
+      updateCritterStatus(
+        formatSuccessMessage(critter, groupToUse, idleStageKey, moveStageKey, duration, {
+          groupFallback: false,
+        }),
+        'ok'
+      );
+    }
+    return;
+  }
+
+  const token = ++critterSelectorState.loadToken;
+
+  if (!options.silent) {
+    const idleCode = buildCritterAnimationCode(groupToUse, idleStageKey);
+    const moveCode = buildCritterAnimationCode(groupToUse, moveStageKey);
+    updateCritterStatus(
+      `Загружаем ${formatCritterDisplayName(critter)} — ${idleCode}/${moveCode}...`,
+      'info'
+    );
+  }
+
+  const loadOptions = { directionOrder: playerSettings.directionOrder };
+  const runPath = buildCritterAnimationPath(critter.code, groupToUse, moveStageKey);
+  const idlePath = buildCritterAnimationPath(critter.code, groupToUse, idleStageKey);
+
+  let runAnimation = null;
+  let idleAnimation = null;
+
+  try {
+    [runAnimation, idleAnimation] = await Promise.all([
+      tryLoadAnimation(runPath, loadOptions),
+      idlePath !== runPath ? tryLoadAnimation(idlePath, loadOptions) : Promise.resolve(null),
+    ]);
+
+    if (critterSelectorState.loadToken !== token) {
+      return;
+    }
+
+    if (!runAnimation && !idleAnimation) {
+      throw new Error('NO_ANIMATION');
+    }
+  } catch (error) {
+    if (critterSelectorState.loadToken !== token) {
+      return;
+    }
+
+    console.error('[ui] Не удалось загрузить анимации персонажа', error);
+
+    if (previousSelection) {
+      critterSelectorState.group = previousSelection.group;
+      critterSelectorState.idleStage = previousSelection.idleStage;
+      critterSelectorState.moveStage = previousSelection.moveStage;
+      critterSelectorState.highlightedCode = previousSelection.codeLower;
+    } else {
+      critterSelectorState.group = GROUP_IDS_SORTED[0] ?? 'A';
+      critterSelectorState.idleStage = 'idle';
+      critterSelectorState.moveStage = 'run';
+      critterSelectorState.highlightedCode = previousHighlight;
+    }
+
+    updateGroupOptionState(critterSelectorState.activeCritter, critterSelectorState.group);
+    refreshStageSelectOptions();
+    updateHighlight(true);
+
+    const idleCode = buildCritterAnimationCode(groupToUse, idleStageKey);
+    const moveCode = buildCritterAnimationCode(groupToUse, moveStageKey);
+    updateCritterStatus(
+      `Не удалось загрузить ${idleCode}/${moveCode} для ${formatCritterDisplayName(critter)}. Проверьте наличие GIF файлов.`,
+      'error'
+    );
+    return;
+  }
+
+  playerAnimations.run = runAnimation;
+  playerAnimations.idle = idleAnimation ?? runAnimation;
+
+  applyDirectionOrderFromAnimation(playerAnimations.run || playerAnimations.idle);
+  ensureDefaultFacingIsValid();
+
+  playerSettings.runPath = runPath;
+  playerSettings.idlePath = idlePath;
+
+  const moveDuration = resolveMoveDurationForCritter(critter);
+  playerSettings.moveDuration = moveDuration;
+  syncPlayerVisualMoveDurations();
+
+  critterSelectorState.activeCritter = critter;
+  critterSelectorState.activeSelection = {
+    codeLower: critter.codeLower,
+    group: groupToUse,
+    idleStage: idleStageKey,
+    moveStage: moveStageKey,
+  };
+  critterSelectorState.group = groupToUse;
+  critterSelectorState.idleStage = idleStageKey;
+  critterSelectorState.moveStage = moveStageKey;
+  critterSelectorState.highlightedCode = critter.codeLower;
+
+  updateGroupOptionState(critter, groupToUse);
+  refreshStageSelectOptions();
+  updateHighlight(true);
+
+  const message = formatSuccessMessage(
+    critter,
+    groupToUse,
+    idleStageKey,
+    moveStageKey,
+    moveDuration,
+    { groupFallback: fallbackUsed }
+  );
+  updateCritterStatus(message, 'ok');
+}
+
+function handleCritterSelectionByCode(code) {
+  const normalizedCode = normalizeCritterCode(code);
+  if (!normalizedCode) {
+    return;
+  }
+
+  const critter = getCritterByCode(normalizedCode);
+  if (!critter) {
+    updateCritterStatus(`Персонаж с кодом ${code.toUpperCase()} не найден.`, 'error');
+    return;
+  }
+
+  critterSelectorState.highlightedCode = critter.codeLower;
+  updateHighlight(true);
+
+  applyCritterSelection(critter, {
+    previousHighlight: critterSelectorState.activeSelection?.codeLower ?? null,
+  }).catch(error => {
+    console.error('[ui] Ошибка применения персонажа', error);
+  });
+}
+
+function handleCritterListClick(event) {
+  const target = event.target instanceof Element
+    ? event.target.closest('[data-role="critter-option"]')
+    : null;
+  if (!target) {
+    return;
+  }
+  event.preventDefault();
+  handleCritterSelectionByCode(target.dataset.code ?? '');
+}
+
+function reapplyActiveCritter() {
+  if (!critterSelectorState.activeCritter) {
+    return;
+  }
+  critterSelectorState.highlightedCode = critterSelectorState.activeCritter.codeLower;
+  updateHighlight(false);
+  applyCritterSelection(critterSelectorState.activeCritter, {
+    previousHighlight: critterSelectorState.activeSelection?.codeLower ?? null,
+  }).catch(error => {
+    console.error('[ui] Ошибка обновления анимации персонажа', error);
+  });
+}
+
+function deriveInitialSelectionFromSettings() {
+  const parsedRun = parseCritterAnimationPath(playerSettings.runPath);
+  const parsedIdle = parseCritterAnimationPath(playerSettings.idlePath);
+  const base = parsedRun ?? parsedIdle;
+  if (!base?.code) {
+    return null;
+  }
+  const critter = getCritterByCode(base.code);
+  if (!critter) {
+    return null;
+  }
+  const group =
+    (base.group && PRIMARY_ANIMATION_GROUPS[base.group])
+      ? base.group
+      : getDefaultCritterGroup(critter);
+  const idleStage = normalizeStageKey(parsedIdle?.stage ?? base.stage, 'idle');
+  const moveStage = normalizeStageKey(parsedRun?.stage ?? base.stage, 'run');
+  return { critter, group, idleStage, moveStage };
+}
+
+function initializeCritterSelector() {
+  if (!critterSelectorEl) {
+    return;
+  }
+
+  if (critterGroupSelect) {
+    critterGroupSelect.innerHTML = '';
+    GROUP_METADATA_SORTED.forEach(meta => {
+      const option = document.createElement('option');
+      option.value = meta.id;
+      option.textContent = `${meta.id} — ${meta.label}`;
+      critterGroupSelect.appendChild(option);
+    });
+  }
+
+  if (critterTypeFilter) {
+    critterTypeFilter.innerHTML = '';
+    const allOption = document.createElement('option');
+    allOption.value = 'all';
+    allOption.textContent = 'Все типы';
+    critterTypeFilter.appendChild(allOption);
+    listCritterTypes().forEach(type => {
+      const option = document.createElement('option');
+      option.value = String(type.id);
+      option.textContent = type.label;
+      critterTypeFilter.appendChild(option);
+    });
+    critterTypeFilter.value = 'all';
+  }
+
+  const initialSelection = deriveInitialSelectionFromSettings();
+
+  if (initialSelection) {
+    critterSelectorState.activeCritter = initialSelection.critter;
+    critterSelectorState.activeSelection = {
+      codeLower: initialSelection.critter.codeLower,
+      group: initialSelection.group,
+      idleStage: initialSelection.idleStage,
+      moveStage: initialSelection.moveStage,
+    };
+    critterSelectorState.group = initialSelection.group;
+    critterSelectorState.idleStage = initialSelection.idleStage;
+    critterSelectorState.moveStage = initialSelection.moveStage;
+    critterSelectorState.highlightedCode = initialSelection.critter.codeLower;
+  } else {
+    critterSelectorState.group = GROUP_IDS_SORTED[0] ?? 'A';
+    critterSelectorState.idleStage = 'idle';
+    critterSelectorState.moveStage = 'run';
+    critterSelectorState.highlightedCode = null;
+    critterSelectorState.activeCritter = null;
+    critterSelectorState.activeSelection = null;
+  }
+
+  updateGroupOptionState(critterSelectorState.activeCritter, critterSelectorState.group);
+  refreshStageSelectOptions();
+  renderCritterList({ resetScroll: true });
+  updateHighlight(Boolean(critterSelectorState.highlightedCode));
+
+  if (critterListEl) {
+    critterListEl.addEventListener('click', handleCritterListClick);
+  }
+
+  if (critterSearchInput) {
+    critterSearchInput.value = critterSelectorState.searchTerm;
+    critterSearchInput.addEventListener('input', event => {
+      critterSelectorState.searchTerm = event.target.value ?? '';
+      renderCritterList({ resetScroll: true });
+    });
+  }
+
+  if (critterTypeFilter) {
+    critterTypeFilter.addEventListener('change', event => {
+      const value = event.target.value ?? 'all';
+      critterSelectorState.typeFilter = value || 'all';
+      renderCritterList({ resetScroll: true });
+    });
+  }
+
+  if (critterGroupSelect) {
+    critterGroupSelect.value = critterSelectorState.group;
+    critterGroupSelect.addEventListener('change', event => {
+      const value = event.target.value;
+      if (!value || value === critterSelectorState.group) {
+        return;
+      }
+      critterSelectorState.group = value;
+      refreshStageSelectOptions();
+      if (critterSelectorState.activeCritter) {
+        reapplyActiveCritter();
+      }
+    });
+  }
+
+  if (critterIdleStageSelect) {
+    critterIdleStageSelect.value = critterSelectorState.idleStage;
+    critterIdleStageSelect.addEventListener('change', event => {
+      const value = normalizeStageKey(event.target.value, 'idle');
+      if (value === critterSelectorState.idleStage) {
+        return;
+      }
+      critterSelectorState.idleStage = value;
+      if (critterSelectorState.activeCritter) {
+        reapplyActiveCritter();
+      }
+    });
+  }
+
+  if (critterMoveStageSelect) {
+    critterMoveStageSelect.value = critterSelectorState.moveStage;
+    critterMoveStageSelect.addEventListener('change', event => {
+      const value = normalizeStageKey(event.target.value, 'run');
+      if (value === critterSelectorState.moveStage) {
+        return;
+      }
+      critterSelectorState.moveStage = value;
+      if (critterSelectorState.activeCritter) {
+        reapplyActiveCritter();
+      }
+    });
+  }
+
+  if (initialSelection) {
+    const moveDuration = resolveMoveDurationForCritter(initialSelection.critter);
+    updateCritterStatus(
+      formatSuccessMessage(
+        initialSelection.critter,
+        initialSelection.group,
+        initialSelection.idleStage,
+        initialSelection.moveStage,
+        moveDuration
+      ),
+      'ok'
+    );
+  } else {
+    updateCritterStatus(DEFAULT_CRITTER_STATUS_MESSAGE, 'info');
+  }
+}
+
 function applyUiConfig(config) {
   if (!config) {
     return;
@@ -813,6 +1509,7 @@ async function initializeUi() {
   applyPlayerSettings(mergedConfig.Player);
   applyUiConfig(mergedConfig);
   await loadPlayerAnimationsFromSettings();
+  initializeCritterSelector();
 }
 
 const canvas = document.getElementById('hexCanvas');
