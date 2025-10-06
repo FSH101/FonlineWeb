@@ -94,8 +94,6 @@ const critterSelectorEl = document.getElementById('critterSelector');
 const critterSearchInput = document.getElementById('critterSearch');
 const critterTypeFilter = document.getElementById('critterTypeFilter');
 const critterGroupSelect = document.getElementById('critterGroupSelect');
-const critterIdleStageSelect = document.getElementById('critterIdleStage');
-const critterMoveStageSelect = document.getElementById('critterMoveStage');
 const critterListEl = document.getElementById('critterList');
 const critterEmptyMessageEl = document.getElementById('critterEmptyMessage');
 const critterStatusEl = document.getElementById('critterStatus');
@@ -789,14 +787,7 @@ function buildOverlays(config) {
   });
 }
 
-const CRITTER_STAGE_LABELS = {
-  idle: 'Покой',
-  walk: 'Шаг',
-  run: 'Бег',
-};
-
-const STAGE_ENTRIES = Object.entries(CRITTER_STAGE_SUFFIX);
-const STAGE_SUFFIX_TO_KEY = STAGE_ENTRIES.reduce((acc, [key, suffix]) => {
+const STAGE_SUFFIX_TO_KEY = Object.entries(CRITTER_STAGE_SUFFIX).reduce((acc, [key, suffix]) => {
   acc[String(suffix).toUpperCase()] = key;
   return acc;
 }, {});
@@ -839,6 +830,20 @@ function normalizeStageKey(stage, fallback = 'idle') {
   }
   const normalized = STAGE_SUFFIX_TO_KEY[String(stage).toUpperCase()];
   return normalized ?? fallback;
+}
+
+function resolveDefaultStagesForCritter(critter) {
+  const idleStage = 'idle';
+  const canRun = critter?.capabilities?.run !== false;
+  const moveStage = canRun ? 'run' : 'walk';
+  return { idle: idleStage, move: moveStage };
+}
+
+function resetPlayerVisualFrameStates() {
+  for (const visual of playerVisuals.values()) {
+    visual.frameIndex = 0;
+    visual.frameTimer = 0;
+  }
 }
 
 function updateCritterStatus(message, variant = 'info') {
@@ -1019,41 +1024,6 @@ function updateGroupOptionState(critter, desiredGroup) {
   return resolvedGroup;
 }
 
-function refreshStageSelectOptions() {
-  if (!critterIdleStageSelect || !critterMoveStageSelect) {
-    return;
-  }
-
-  const populate = (select, selectedValue, fallback) => {
-    select.innerHTML = '';
-    for (const [stageKey] of STAGE_ENTRIES) {
-      const option = document.createElement('option');
-      option.value = stageKey;
-      const label = CRITTER_STAGE_LABELS[stageKey] ?? stageKey;
-      option.textContent = `${buildCritterAnimationCode(critterSelectorState.group, stageKey)} — ${label}`;
-      select.appendChild(option);
-    }
-    const hasSelected = STAGE_ENTRIES.some(([stageKey]) => stageKey === selectedValue);
-    const valueToUse = hasSelected ? selectedValue : fallback;
-    select.value = valueToUse;
-    return valueToUse;
-  };
-
-  const idleValue = populate(
-    critterIdleStageSelect,
-    normalizeStageKey(critterSelectorState.idleStage, 'idle'),
-    'idle'
-  );
-  const moveValue = populate(
-    critterMoveStageSelect,
-    normalizeStageKey(critterSelectorState.moveStage, 'run'),
-    'run'
-  );
-
-  critterSelectorState.idleStage = idleValue;
-  critterSelectorState.moveStage = moveValue;
-}
-
 function resolveGroupForCritter(critter) {
   if (!critter) {
     return critterSelectorState.group;
@@ -1090,7 +1060,7 @@ function formatSuccessMessage(critter, group, idleStageKey, moveStageKey, moveDu
   const idleCode = buildCritterAnimationCode(group, idleStageKey);
   const moveCode = buildCritterAnimationCode(group, moveStageKey);
   const formattedDuration = numberFormatter.format(Math.round(moveDuration));
-  let message = `${formatCritterDisplayName(critter)}: ${groupLabel}. Покой — ${idleCode}, Движение — ${moveCode}. Скорость: ${formattedDuration} мс.`;
+  let message = `${formatCritterDisplayName(critter)}: ${groupLabel}. Анимации — ${idleCode}/${moveCode}. Скорость: ${formattedDuration} мс.`;
   if (options.groupFallback) {
     message += ' Выбранная группа недоступна, применено значение по умолчанию.';
   }
@@ -1106,8 +1076,19 @@ async function applyCritterSelection(critter, options = {}) {
   const previousHighlight =
     options.previousHighlight ?? previousSelection?.codeLower ?? null;
 
-  const idleStageKey = normalizeStageKey(critterSelectorState.idleStage, 'idle');
-  const moveStageKey = normalizeStageKey(critterSelectorState.moveStage, 'run');
+  const defaults = resolveDefaultStagesForCritter(critter);
+  let idleStageKey = normalizeStageKey(critterSelectorState.idleStage, defaults.idle);
+  let moveStageKey = normalizeStageKey(critterSelectorState.moveStage, defaults.move);
+
+  if (
+    !previousSelection ||
+    previousSelection.codeLower !== critter.codeLower ||
+    previousSelection.group !== critterSelectorState.group
+  ) {
+    idleStageKey = defaults.idle;
+    moveStageKey = defaults.move;
+  }
+
   critterSelectorState.idleStage = idleStageKey;
   critterSelectorState.moveStage = moveStageKey;
 
@@ -1179,13 +1160,13 @@ async function applyCritterSelection(critter, options = {}) {
       critterSelectorState.highlightedCode = previousSelection.codeLower;
     } else {
       critterSelectorState.group = GROUP_IDS_SORTED[0] ?? 'A';
-      critterSelectorState.idleStage = 'idle';
-      critterSelectorState.moveStage = 'run';
+      const fallbackStages = resolveDefaultStagesForCritter(critter);
+      critterSelectorState.idleStage = fallbackStages.idle;
+      critterSelectorState.moveStage = fallbackStages.move;
       critterSelectorState.highlightedCode = previousHighlight;
     }
 
     updateGroupOptionState(critterSelectorState.activeCritter, critterSelectorState.group);
-    refreshStageSelectOptions();
     updateHighlight(true);
 
     const idleCode = buildCritterAnimationCode(groupToUse, idleStageKey);
@@ -1202,6 +1183,7 @@ async function applyCritterSelection(critter, options = {}) {
 
   applyDirectionOrderFromAnimation(playerAnimations.run || playerAnimations.idle);
   ensureDefaultFacingIsValid();
+  resetPlayerVisualFrameStates();
 
   playerSettings.runPath = runPath;
   playerSettings.idlePath = idlePath;
@@ -1223,7 +1205,6 @@ async function applyCritterSelection(critter, options = {}) {
   critterSelectorState.highlightedCode = critter.codeLower;
 
   updateGroupOptionState(critter, groupToUse);
-  refreshStageSelectOptions();
   updateHighlight(true);
 
   const message = formatSuccessMessage(
@@ -1349,15 +1330,15 @@ function initializeCritterSelector() {
     critterSelectorState.highlightedCode = initialSelection.critter.codeLower;
   } else {
     critterSelectorState.group = GROUP_IDS_SORTED[0] ?? 'A';
-    critterSelectorState.idleStage = 'idle';
-    critterSelectorState.moveStage = 'run';
+    const defaults = resolveDefaultStagesForCritter(null);
+    critterSelectorState.idleStage = defaults.idle;
+    critterSelectorState.moveStage = defaults.move;
     critterSelectorState.highlightedCode = null;
     critterSelectorState.activeCritter = null;
     critterSelectorState.activeSelection = null;
   }
 
   updateGroupOptionState(critterSelectorState.activeCritter, critterSelectorState.group);
-  refreshStageSelectOptions();
   renderCritterList({ resetScroll: true });
   updateHighlight(Boolean(critterSelectorState.highlightedCode));
 
@@ -1389,35 +1370,9 @@ function initializeCritterSelector() {
         return;
       }
       critterSelectorState.group = value;
-      refreshStageSelectOptions();
-      if (critterSelectorState.activeCritter) {
-        reapplyActiveCritter();
-      }
-    });
-  }
-
-  if (critterIdleStageSelect) {
-    critterIdleStageSelect.value = critterSelectorState.idleStage;
-    critterIdleStageSelect.addEventListener('change', event => {
-      const value = normalizeStageKey(event.target.value, 'idle');
-      if (value === critterSelectorState.idleStage) {
-        return;
-      }
-      critterSelectorState.idleStage = value;
-      if (critterSelectorState.activeCritter) {
-        reapplyActiveCritter();
-      }
-    });
-  }
-
-  if (critterMoveStageSelect) {
-    critterMoveStageSelect.value = critterSelectorState.moveStage;
-    critterMoveStageSelect.addEventListener('change', event => {
-      const value = normalizeStageKey(event.target.value, 'run');
-      if (value === critterSelectorState.moveStage) {
-        return;
-      }
-      critterSelectorState.moveStage = value;
+      const stages = resolveDefaultStagesForCritter(critterSelectorState.activeCritter);
+      critterSelectorState.idleStage = stages.idle;
+      critterSelectorState.moveStage = stages.move;
       if (critterSelectorState.activeCritter) {
         reapplyActiveCritter();
       }

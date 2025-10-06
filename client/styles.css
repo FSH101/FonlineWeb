@@ -627,12 +627,6 @@ body.is-mobile .critter-selector {
   grid-column: 1 / -1;
 }
 
-.critter-selector__stage-grid {
-  display: grid;
-  gap: 0.5rem;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
 .critter-selector__label {
   display: block;
   font-size: 0.7rem;
@@ -762,10 +756,6 @@ body.is-mobile .critter-selector {
 }
 
 body.is-mobile .critter-selector__filters {
-  grid-template-columns: 1fr;
-}
-
-body.is-mobile .critter-selector__stage-grid {
   grid-template-columns: 1fr;
 }
 
