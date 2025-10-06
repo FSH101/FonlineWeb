@@ -902,30 +902,25 @@ function updateHighlight(scrollIntoView = false) {
     critterSelectorState.activeSelection?.codeLower ??
     null;
 
-  let selectedButton = null;
-  const options = critterListEl.querySelectorAll('[data-role="critter-option"]');
-
-  options.forEach(option => {
-    if (option.dataset.code === desiredCode) {
-      option.classList.add('is-selected');
-      option.setAttribute('aria-selected', 'true');
-      selectedButton = option;
-    } else {
-      option.classList.remove('is-selected');
-      option.setAttribute('aria-selected', 'false');
-    }
-  });
-
-  if (selectedButton) {
-    critterListEl.setAttribute('aria-activedescendant', selectedButton.id);
-    if (scrollIntoView) {
-      selectedButton.scrollIntoView({ block: 'nearest' });
-    }
-  } else {
-    critterListEl.removeAttribute('aria-activedescendant');
+  if (!desiredCode) {
+    critterListEl.selectedIndex = -1;
+    return null;
   }
 
-  return selectedButton;
+  const option = Array.from(critterListEl.options).find(
+    current => current.value === desiredCode
+  );
+
+  if (option) {
+    option.selected = true;
+    if (scrollIntoView && typeof option.scrollIntoView === 'function') {
+      option.scrollIntoView({ block: 'nearest' });
+    }
+    return option;
+  }
+
+  critterListEl.selectedIndex = -1;
+  return null;
 }
 
 function renderCritterList(options = {}) {
@@ -940,40 +935,28 @@ function renderCritterList(options = {}) {
   const fragment = document.createDocumentFragment();
 
   for (const critter of critters) {
-    const listItem = document.createElement('li');
-    listItem.setAttribute('role', 'presentation');
-
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'critter-selector__item';
-    button.dataset.role = 'critter-option';
-    button.dataset.code = critter.codeLower;
-    button.id = `critter-option-${critter.codeLower}`;
-    button.setAttribute('role', 'option');
-    button.setAttribute('aria-selected', 'false');
-    button.title = formatCritterDisplayName(critter);
-
-    const codeSpan = document.createElement('span');
-    codeSpan.className = 'critter-selector__item-code';
-    codeSpan.textContent = critter.codeUpper ?? critter.code.toUpperCase();
-
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'critter-selector__item-name';
-    nameSpan.textContent = formatCritterDisplayName(critter);
-
-    const typeSpan = document.createElement('span');
-    typeSpan.className = 'critter-selector__item-type';
-    typeSpan.textContent = critter.typeLabel ?? '';
-
-    button.append(codeSpan, nameSpan, typeSpan);
-    listItem.appendChild(button);
-    fragment.appendChild(listItem);
+    const option = document.createElement('option');
+    option.value = critter.codeLower;
+    option.dataset.role = 'critter-option';
+    const displayName = formatCritterDisplayName(critter);
+    const typeSuffix = critter.typeLabel ? ` • ${critter.typeLabel}` : '';
+    option.textContent = `${critter.codeUpper ?? critter.code.toUpperCase()} — ${displayName}${typeSuffix}`;
+    option.title = critter.typeLabel ? `${displayName} • ${critter.typeLabel}` : displayName;
+    if (critter.typeLabel) {
+      option.dataset.typeLabel = critter.typeLabel;
+    }
+    fragment.appendChild(option);
   }
 
   critterListEl.appendChild(fragment);
 
   if (resetScroll) {
     critterListEl.scrollTop = 0;
+  }
+
+  critterListEl.disabled = critters.length === 0;
+  if (critterListEl.disabled) {
+    critterListEl.selectedIndex = -1;
   }
 
   if (critterEmptyMessageEl) {
@@ -1240,15 +1223,12 @@ function handleCritterSelectionByCode(code) {
   });
 }
 
-function handleCritterListClick(event) {
-  const target = event.target instanceof Element
-    ? event.target.closest('[data-role="critter-option"]')
-    : null;
-  if (!target) {
+function handleCritterListChange(event) {
+  const value = event?.target?.value ?? '';
+  if (!value) {
     return;
   }
-  event.preventDefault();
-  handleCritterSelectionByCode(target.dataset.code ?? '');
+  handleCritterSelectionByCode(value);
 }
 
 function reapplyActiveCritter() {
@@ -1343,7 +1323,7 @@ function initializeCritterSelector() {
   updateHighlight(Boolean(critterSelectorState.highlightedCode));
 
   if (critterListEl) {
-    critterListEl.addEventListener('click', handleCritterListClick);
+    critterListEl.addEventListener('change', handleCritterListChange);
   }
 
   if (critterSearchInput) {

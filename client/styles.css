@@ -668,63 +668,38 @@ body.is-mobile .critter-selector {
   min-height: 220px;
 }
 
-.critter-selector__list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 0.4rem;
-  max-height: 260px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.critter-selector__list::-webkit-scrollbar {
-  width: 8px;
-}
-
-.critter-selector__list::-webkit-scrollbar-thumb {
-  background: rgba(192, 255, 86, 0.25);
-  border-radius: 4px;
-}
-
-.critter-selector__item {
-  display: grid;
-  gap: 0.3rem;
-  padding: 0.65rem 0.75rem;
+.critter-selector__dropdown {
+  width: 100%;
+  min-height: 220px;
   border-radius: 10px;
   border: 1px solid rgba(140, 198, 128, 0.18);
   background: rgba(6, 13, 9, 0.65);
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-family: inherit;
+  padding: 0.35rem 0.5rem;
+  line-height: 1.4;
+  overflow-y: auto;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
   transition: border-color 140ms ease, background 140ms ease;
-  appearance: none;
-  -webkit-appearance: none;
 }
 
-.critter-selector__item:hover,
-.critter-selector__item:focus,
-.critter-selector__item.is-selected {
+.critter-selector__dropdown:focus {
   outline: none;
   border-color: rgba(192, 255, 86, 0.6);
   background: rgba(40, 70, 44, 0.8);
 }
 
-.critter-selector__item-code {
-  font-family: 'Roboto Mono', 'Fira Code', monospace;
-  font-size: 0.8rem;
-  letter-spacing: 0.08em;
+.critter-selector__dropdown option {
+  padding: 0.35rem 0.45rem;
+  background: rgba(6, 13, 9, 0.95);
+  color: inherit;
+}
+
+.critter-selector__dropdown option:focus,
+.critter-selector__dropdown option:checked {
+  background: rgba(40, 70, 44, 0.9);
   color: var(--accent);
-}
-
-.critter-selector__item-name {
-  font-size: 0.9rem;
-}
-
-.critter-selector__item-type {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
 }
 
 .critter-selector__empty {
@@ -759,8 +734,8 @@ body.is-mobile .critter-selector__filters {
   grid-template-columns: 1fr;
 }
 
-body.is-mobile .critter-selector__list {
-  max-height: clamp(200px, 45vh, 320px);
+body.is-mobile .critter-selector__dropdown {
+  min-height: clamp(200px, 45vh, 320px);
 }
 
 .chat {
