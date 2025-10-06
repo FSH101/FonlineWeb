@@ -1,3 +1,5 @@
+import { CRITTER_RELEASE_BASES } from './releaseArchives.js';
+
 const DEFAULT_DIRECTION_ORDER = [
   'northEast',
   'east',
@@ -117,6 +119,7 @@ function collectGifBaseUrls(basePath, extraBaseUrls = []) {
     uppercaseBase,
     uppercaseFolderless,
     ...CRITTER_LOCAL_BASES,
+    ...CRITTER_RELEASE_BASES,
   ];
 
   const unique = [];

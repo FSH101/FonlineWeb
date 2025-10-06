@@ -1,5 +1,6 @@
 import { decodeFr } from '../fr/decoder.js';
 import { getInlineManifest } from './assets/manifestRegistry.js';
+import { fetchReleaseResource, isReleaseBaseUrl } from './assets/releaseArchives.js';
 
 const FR_EXTENSIONS = new Set(['.fr', '.frm']);
 
@@ -78,9 +79,56 @@ function normalizeBaseUrl(url) {
   return trimmed.replace(/\/+$/, '');
 }
 
+function guessMimeTypeFromName(name) {
+  const lower = typeof name === 'string' ? name.toLowerCase() : '';
+  if (lower.endsWith('.gif')) {
+    return 'image/gif';
+  }
+  if (lower.endsWith('.png')) {
+    return 'image/png';
+  }
+  if (lower.endsWith('.webp')) {
+    return 'image/webp';
+  }
+  return 'application/octet-stream';
+}
+
+function arrayBufferFromTypedArray(typed) {
+  if (typed instanceof ArrayBuffer) {
+    return typed.slice(0);
+  }
+  if (!(typed instanceof Uint8Array)) {
+    return null;
+  }
+  return typed.buffer.slice(typed.byteOffset, typed.byteOffset + typed.byteLength);
+}
+
 async function fetchResourceFromBases(baseUrls, directory, resourceName, responseType = 'blob') {
   let lastError = null;
   for (const base of baseUrls) {
+    if (isReleaseBaseUrl(base)) {
+      try {
+        const releaseEntry = await fetchReleaseResource(base, directory, resourceName);
+        if (!releaseEntry) {
+          continue;
+        }
+        if (responseType === 'arrayBuffer') {
+          const buffer = arrayBufferFromTypedArray(releaseEntry.bytes);
+          if (buffer) {
+            return { data: buffer, url: releaseEntry.url };
+          }
+        } else {
+          const blob = new Blob([releaseEntry.bytes], {
+            type: guessMimeTypeFromName(resourceName),
+          });
+          return { data: blob, url: releaseEntry.url };
+        }
+      } catch (error) {
+        lastError = error;
+      }
+      continue;
+    }
+
     const directoryBase = joinUrl(base, directory ?? '');
     const resourceUrl = joinUrl(directoryBase, resourceName);
     try {
